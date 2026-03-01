@@ -124,6 +124,26 @@
     localStorage.setItem(THEME_KEY, mode);
     const icon = $('#themeIcon');
     icon.textContent = mode === 'dark' ? '🌙' : mode === 'light' ? '🌞' : '🌤️';
+    const apply = () => {
+      if (mode === 'dark') html.classList.add('dark');
+      else if (mode === 'light') html.classList.remove('dark');
+      else {
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (prefersDark) html.classList.add('dark'); else html.classList.remove('dark');
+      }
+    };
+    apply();
+    if (!setThemeMode._media) {
+      const m = window.matchMedia('(prefers-color-scheme: dark)');
+      m.addEventListener('change', () => {
+        const modeNow = document.documentElement.getAttribute('data-theme') || 'auto';
+        if (modeNow === 'auto') {
+          const prefersDark = m.matches;
+          if (prefersDark) html.classList.add('dark'); else html.classList.remove('dark');
+        }
+      });
+      setThemeMode._media = m;
+    }
   }
 
   function cycleTheme() {

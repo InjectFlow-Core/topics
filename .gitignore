@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+tailwind.css.map
+
+# Dev/build sources (keep output CSS only)
+src/
+tailwind.config.js
+postcss.config.js
+package-lock.json
+package.json
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor/OS
+.DS_Store
+.idea/
+.vscode/
+Thumbs.db
+
+# Env
+.env
+.env.*
+
+# Legacy styles no longer used
+styles.css
