@@ -8,6 +8,8 @@
   const FORCE_REMOTE = true;
   const LOCAL_REV_KEY = 'kaban.localRev.v1';
   let localRev = parseInt(localStorage.getItem(LOCAL_REV_KEY) || '0', 10) || 0;
+  // When true, skip remote pulls until remote reflects our latest local write
+  let awaitingRemoteCatchUp = false;
   const AUTH_ITERATIONS = 120000;
   // Signing keys (owner): set these to enable cross-device, cross-site owner signing
   // Public key JWK (ECDSA P-256) and encrypted private key blob
@@ -472,6 +474,9 @@
       render();
       lastFileMtimeMs = file.lastModified || Date.now();
       lastSyncAtMs = Date.now();
+      // If the file contains an exportedAt, wait for remote to reflect it
+      const fileExportedAt = Date.parse(parsed?.meta?.exportedAt || 0) || 0;
+      if (fileExportedAt) awaitingRemoteCatchUp = true;
       // Update local revision to file's revision if present
       const fileRev = Number(parsed?.meta?.rev || 0);
       if (fileRev) { localRev = Math.max(localRev, fileRev); localStorage.setItem(LOCAL_REV_KEY, String(localRev)); }
@@ -504,6 +509,8 @@
       lastSyncAtMs = Date.parse(nowIso) || Date.now();
       // Prevent remote from overwriting local within a short window
       suppressRemoteUntilMs = Date.now() + 30000; // 30s cooldown
+      // Hold off accepting remote until it reflects this write
+      awaitingRemoteCatchUp = true;
       updateLinkedStatus();
     } catch (e) { console.warn('File write failed', e); }
   }
@@ -595,6 +602,13 @@
         // Remote is older than our last local write; skip to prevent flicker
         if (manual) toast('Skipped: remote is older than local');
         return;
+      }
+      // If we're waiting for remote to catch up, only accept once it matches or exceeds our last write
+      if (awaitingRemoteCatchUp) {
+        const okByTime = lastSyncAtMs ? (remoteTs >= lastSyncAtMs) : true;
+        const okByRev = remoteRev ? (remoteRev >= localRev) : true;
+        if (!(okByTime && okByRev)) { if (manual) toast('Waiting for remote to catch up'); return; }
+        awaitingRemoteCatchUp = false;
       }
       if (SIGN_PUB_JWK) {
         const pub = await importPubKey();
