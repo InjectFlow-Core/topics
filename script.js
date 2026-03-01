@@ -471,6 +471,9 @@
       render();
       lastFileMtimeMs = file.lastModified || Date.now();
       lastSyncAtMs = Date.now();
+      // Update local revision to file's revision if present
+      const fileRev = Number(parsed?.meta?.rev || 0);
+      if (fileRev) { localRev = Math.max(localRev, fileRev); localStorage.setItem(LOCAL_REV_KEY, String(localRev)); }
       updateLinkedStatus();
       if (manual) toast('Pulled from linked file');
     } catch { if (manual) toast('Failed to read linked file'); }
@@ -585,9 +588,10 @@
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const parsed = await res.json();
       const data = parsed?.data || parsed;
+      const remoteRev = Number(parsed?.meta?.rev || 0);
       // If we recently wrote locally, avoid overwriting with an older remote
       const remoteTs = Date.parse(parsed?.meta?.exportedAt || 0) || 0;
-      if (lastSyncAtMs && remoteTs && remoteTs < lastSyncAtMs) {
+      if ((remoteRev && remoteRev < localRev) || (lastSyncAtMs && remoteTs && remoteTs < lastSyncAtMs)) {
         // Remote is older than our last local write; skip to prevent flicker
         if (manual) toast('Skipped: remote is older than local');
         return;
@@ -605,6 +609,7 @@
       saveState({ writeLinked: false });
       render();
       lastRemoteSyncMs = Date.now();
+      if (remoteRev) { localRev = remoteRev; localStorage.setItem(LOCAL_REV_KEY, String(localRev)); }
       updateLinkedStatus();
       if (manual) toast('Pulled from remote');
     } catch (e) {
