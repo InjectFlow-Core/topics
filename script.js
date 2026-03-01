@@ -681,8 +681,8 @@
     try {
       if (Date.now() < suppressRemoteUntilMs) { if (manual) toast('Skipped: awaiting local sync'); return; }
       const bust = (remoteUrl.includes('?') ? '&' : '?') + '_ts=' + Date.now();
-      // Avoid custom headers to prevent CORS preflight; rely on cache-busting param
-      const res = await fetch(remoteUrl + bust, { mode: 'cors', cache: 'no-store' });
+      // Avoid custom headers and request cache options to prevent CORS preflight; rely on query bust only
+      const res = await fetch(remoteUrl + bust, { mode: 'cors' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const parsed = await res.json();
       const data = parsed?.data || parsed;
