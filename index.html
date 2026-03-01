@@ -39,6 +39,9 @@
           <input type="file" id="importInput" accept="application/json" hidden />
         </label>
         <button id="clearBoardBtn" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200" title="Reset to Seed" aria-label="Reset">Reset</button>
+        <button id="linkJsonBtn" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200" title="Link a JSON file for sync" aria-label="Link JSON">Link JSON</button>
+        <button id="pullJsonBtn" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200" title="Pull state from linked JSON" aria-label="Pull JSON" disabled>Pull</button>
+        <span id="linkedStatus" class="hidden sm:inline text-xs text-slate-500 dark:text-slate-400 ml-1"></span>
         <button id="densityToggle" class="w-9 h-9 grid place-items-center rounded-md border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300" title="Toggle density" aria-label="Density">
           <span id="densityIcon" aria-hidden="true">↕️</span>
         </button>
@@ -92,6 +95,51 @@
           <div class="flex-1"></div>
           <button type="button" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600" id="cancelBtn">Cancel</button>
           <button type="submit" class="px-3 py-1.5 rounded-md bg-primary text-white text-sm" id="saveBtn">Save</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <!-- Confirm Modal -->
+    <dialog id="confirmModal" class="modal bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 sm:w-[92vw] sm:max-w-sm sm:h-auto sm:rounded-xl">
+      <form method="dialog" id="confirmForm" class="flex flex-col">
+        <header class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
+          <h2 id="confirmTitle" class="font-semibold">Confirm</h2>
+          <button type="button" class="text-slate-500" id="closeConfirmBtn" aria-label="Close">✕</button>
+        </header>
+        <div class="p-4">
+          <p id="confirmMessage" class="text-sm text-slate-600 dark:text-slate-300"></p>
+        </div>
+        <footer class="flex items-center gap-2 px-4 py-3 border-t border-slate-200 dark:border-slate-700">
+          <button type="button" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600" id="cancelConfirmBtn">Cancel</button>
+          <div class="flex-1"></div>
+          <button type="submit" class="px-3 py-1.5 rounded-md bg-rose-500 text-white text-sm" id="confirmConfirmBtn">Confirm</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <!-- Auth Modal -->
+    <dialog id="authModal" class="modal bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 sm:w-[92vw] sm:max-w-sm sm:h-auto sm:rounded-xl">
+      <form method="dialog" id="authForm" class="flex flex-col">
+        <header class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
+          <h2 id="authTitle" class="font-semibold">Security Code</h2>
+          <button type="button" class="text-slate-500" id="closeAuthBtn" aria-label="Close">✕</button>
+        </header>
+        <div class="p-4 grid gap-3">
+          <p id="authHint" class="text-sm text-slate-500"></p>
+          <label class="grid gap-1">
+            <span class="text-xs text-slate-500">Code</span>
+            <input id="authCode" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm" type="password" autocomplete="current-password" />
+          </label>
+          <label id="authConfirmWrap" class="grid gap-1 hidden">
+            <span class="text-xs text-slate-500">Confirm Code</span>
+            <input id="authCodeConfirm" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm" type="password" autocomplete="new-password" />
+          </label>
+          <p id="authError" class="hidden text-xs text-rose-600"></p>
+        </div>
+        <footer class="flex items-center gap-2 px-4 py-3 border-t border-slate-200 dark:border-slate-700">
+          <button type="button" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600" id="cancelAuthBtn">Cancel</button>
+          <div class="flex-1"></div>
+          <button type="submit" class="px-3 py-1.5 rounded-md bg-primary text-white text-sm" id="authSubmitBtn">Continue</button>
         </footer>
       </form>
     </dialog>

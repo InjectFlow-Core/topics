@@ -2,12 +2,20 @@
   const STORAGE_KEY = 'kaban.board.v1';
   const THEME_KEY = 'kaban.theme.v1';
   const DENSITY_KEY = 'kaban.density.v1';
+  const AUTH_STORE_KEY = 'kaban.auth.v1';
+  const AUTH_ITERATIONS = 120000;
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
   // App state
   let state = null;
+  let sessionAuthorized = false; // cleared on reload
+  let linkedFileHandle = null; // FileSystemFileHandle if JSON sync is linked
+  let fileSyncTimer = null;
+  let autoPullTimer = null;
+  let lastFileMtimeMs = 0;
+  let lastSyncAtMs = 0;
 
   // Columns definition
   const columns = [
@@ -110,6 +118,7 @@
 
   function saveState() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    scheduleFileSync();
   }
 
   function loadState() {
@@ -176,6 +185,143 @@
     setDensity(saved);
   }
 
+  // --- Minimal Auth (client-side, encrypted verifier) ---
+  const te = new TextEncoder();
+  const td = new TextDecoder();
+  const MARKER = 'KABAN_AUTH_OK';
+
+  function bufToB64(buf) {
+    const bytes = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array(buf.buffer ?? buf);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+  function b64ToBuf(b64) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes.buffer;
+  }
+
+  async function deriveKey(pass, salt, iterations = AUTH_ITERATIONS) {
+    const baseKey = await crypto.subtle.importKey('raw', te.encode(pass), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+      baseKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+  }
+
+  async function createVerifier(pass) {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const key = await deriveKey(pass, salt, AUTH_ITERATIONS);
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, te.encode(MARKER));
+    return { iter: AUTH_ITERATIONS, salt: bufToB64(salt), iv: bufToB64(iv), ct: bufToB64(ct) };
+  }
+
+  async function verifyPass(pass, blob) {
+    try {
+      const salt = b64ToBuf(blob.salt);
+      const iv = b64ToBuf(blob.iv);
+      const key = await deriveKey(pass, new Uint8Array(salt), blob.iter || AUTH_ITERATIONS);
+      const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(iv) }, key, b64ToBuf(blob.ct));
+      return td.decode(pt) === MARKER;
+    } catch { return false; }
+  }
+
+  async function ensureAuth() {
+    if (sessionAuthorized) return true;
+    const raw = localStorage.getItem(AUTH_STORE_KEY);
+    if (!raw) {
+      const code = await openAuthModal({ mode: 'set' });
+      if (!code) return false;
+      const blob = await createVerifier(code);
+      localStorage.setItem(AUTH_STORE_KEY, JSON.stringify(blob));
+      sessionAuthorized = true;
+      toast('Security code set.');
+      return true;
+    } else {
+      const code = await openAuthModal({ mode: 'verify' });
+      if (!code) return false;
+      const blob = JSON.parse(raw);
+      const ok = await verifyPass(code, blob);
+      if (!ok) { toast('Incorrect code'); return false; }
+      sessionAuthorized = true;
+      return true;
+    }
+  }
+
+  function openAuthModal({ mode }) {
+    return new Promise((resolve) => {
+      const dlg = document.getElementById('authModal');
+      const title = document.getElementById('authTitle');
+      const hint = document.getElementById('authHint');
+      const code = document.getElementById('authCode');
+      const confWrap = document.getElementById('authConfirmWrap');
+      const code2 = document.getElementById('authCodeConfirm');
+      const err = document.getElementById('authError');
+      const form = document.getElementById('authForm');
+      const cancel = document.getElementById('cancelAuthBtn');
+      const closeBtn = document.getElementById('closeAuthBtn');
+
+      err.classList.add('hidden');
+      err.textContent = '';
+      code.value = '';
+      code2.value = '';
+
+      if (mode === 'set') {
+        title.textContent = 'Set Security Code';
+        hint.textContent = 'This code will be required for delete, reset, import, and export.';
+        confWrap.classList.remove('hidden');
+      } else {
+        title.textContent = 'Enter Security Code';
+        hint.textContent = 'Enter your code to continue.';
+        confWrap.classList.add('hidden');
+      }
+
+      function cleanup(res) {
+        form.removeEventListener('submit', onSubmit);
+        cancel.removeEventListener('click', onCancel);
+        closeBtn.removeEventListener('click', onCancel);
+        if (dlg.open) dlg.close();
+        resolve(res);
+      }
+
+      function onCancel() { cleanup(false); }
+
+      async function onSubmit(e) {
+        e.preventDefault();
+        const a = code.value.trim();
+        if (!a || a.length < 6) {
+          err.textContent = 'Code must be at least 6 characters.';
+          err.classList.remove('hidden');
+          code.focus();
+          return;
+        }
+        if (mode === 'set') {
+          const b = code2.value.trim();
+          if (a !== b) {
+            err.textContent = 'Codes do not match.';
+            err.classList.remove('hidden');
+            code2.focus();
+            return;
+          }
+        }
+        cleanup(a);
+      }
+
+      form.addEventListener('submit', onSubmit);
+      cancel.addEventListener('click', onCancel);
+      closeBtn.addEventListener('click', onCancel);
+
+      if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', 'open');
+      setTimeout(() => code.focus(), 50);
+    });
+  }
+
   // Rendering
   function render() {
     const board = $('#board');
@@ -184,6 +330,150 @@
       const node = renderColumn(col);
       board.appendChild(node);
     }
+  }
+
+  // ---------- JSON File Sync (File System Access API) ----------
+  const IDB_DB = 'kaban-idb';
+  const IDB_STORE = 'handles';
+
+  function idbOpen() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(IDB_DB, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE, { keyPath: 'key' });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function idbSetHandle(handle) {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put({ key: 'stateFile', handle });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  async function idbGetHandle() {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const req = tx.objectStore(IDB_STORE).get('stateFile');
+      req.onsuccess = () => resolve(req.result?.handle || null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function idbDeleteHandle() {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).delete('stateFile');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  function fsSupported() { return 'showOpenFilePicker' in window || 'showSaveFilePicker' in window; }
+
+  async function linkJsonFile() {
+    if (!fsSupported()) { toast('File System Access API not supported in this browser.'); return; }
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        multiple: false,
+        types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }],
+      });
+      linkedFileHandle = handle;
+      await idbSetHandle(handle);
+      $('#pullJsonBtn').disabled = false;
+      toast('Linked JSON file.');
+      // optional: pull initial state from file
+      await pullFromLinkedFile();
+    } catch (e) { /* user cancelled */ }
+  }
+
+  async function unlinkJsonFile() {
+    linkedFileHandle = null;
+    await idbDeleteHandle();
+    $('#pullJsonBtn').disabled = true;
+    toast('Unlinked JSON file.');
+  }
+
+  async function pullFromLinkedFile() {
+    if (!linkedFileHandle) return;
+    try {
+      const file = await linkedFileHandle.getFile();
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const data = parsed?.data || parsed;
+      if (data && data.cards && data.columns) {
+        state = data;
+        saveState();
+        render();
+        toast('Pulled state from JSON');
+        // Update mtime + status
+        lastFileMtimeMs = file.lastModified || Date.parse(file.lastModifiedDate || '') || Date.now();
+        lastSyncAtMs = Date.now();
+        updateLinkedStatus();
+      } else {
+        toast('Linked file does not contain a valid board');
+      }
+    } catch (e) {
+      toast('Failed to read linked file');
+    }
+  }
+
+  async function writeToLinkedFile() {
+    if (!linkedFileHandle) return;
+    try {
+      const writable = await linkedFileHandle.createWritable();
+      const backup = { meta: { exportedAt: new Date().toISOString(), app: 'kaban-board', version: 1 }, data: state };
+      await writable.write(JSON.stringify(backup, null, 2));
+      await writable.close();
+      // Refresh file metadata to capture new mtime
+      try {
+        const f = await linkedFileHandle.getFile();
+        lastFileMtimeMs = f.lastModified || Date.now();
+      } catch {}
+      lastSyncAtMs = Date.now();
+      updateLinkedStatus();
+    } catch (e) {
+      // If permission lost or fail, disable link
+      console.warn('File write failed', e);
+    }
+  }
+
+  function scheduleFileSync() {
+    if (!linkedFileHandle) return;
+    clearTimeout(fileSyncTimer);
+    fileSyncTimer = setTimeout(writeToLinkedFile, 500);
+  }
+
+  function updateLinkedStatus() {
+    const el = document.getElementById('linkedStatus');
+    if (!el) return;
+    if (!linkedFileHandle) { el.classList.add('hidden'); el.textContent = ''; return; }
+    const last = lastSyncAtMs ? new Date(lastSyncAtMs).toLocaleTimeString() : '—';
+    el.textContent = `Linked • Last sync ${last}`;
+    el.classList.remove('hidden');
+  }
+
+  function startAutoPull(intervalMs = 12000) {
+    if (!linkedFileHandle) return;
+    clearInterval(autoPullTimer);
+    autoPullTimer = setInterval(async () => {
+      try {
+        const f = await linkedFileHandle.getFile();
+        const mtime = f.lastModified || Date.now();
+        if (mtime > lastFileMtimeMs + 1000) {
+          await pullFromLinkedFile();
+        }
+      } catch (e) {
+        // Permission loss or read error; stop auto pull
+        clearInterval(autoPullTimer);
+      }
+    }, intervalMs);
   }
 
   function renderColumn(col) {
@@ -420,6 +710,39 @@
     else dlg.removeAttribute('open');
   }
 
+  // Generic confirm modal
+  function openConfirmModal({ title = 'Confirm', message = 'Are you sure?', confirmText = 'Confirm', cancelText = 'Cancel' } = {}) {
+    return new Promise((resolve) => {
+      const dlg = document.getElementById('confirmModal');
+      const form = document.getElementById('confirmForm');
+      const titleEl = document.getElementById('confirmTitle');
+      const msgEl = document.getElementById('confirmMessage');
+      const cancelBtn = document.getElementById('cancelConfirmBtn');
+      const closeBtn = document.getElementById('closeConfirmBtn');
+      const confirmBtn = document.getElementById('confirmConfirmBtn');
+
+      titleEl.textContent = title;
+      msgEl.textContent = message;
+      cancelBtn.textContent = cancelText;
+      confirmBtn.textContent = confirmText;
+
+      function cleanup(result) {
+        form.removeEventListener('submit', onSubmit);
+        cancelBtn.removeEventListener('click', onCancel);
+        closeBtn.removeEventListener('click', onCancel);
+        if (dlg.open) dlg.close();
+        resolve(result);
+      }
+      function onCancel() { cleanup(false); }
+      function onSubmit(e) { e.preventDefault(); cleanup(true); }
+
+      form.addEventListener('submit', onSubmit);
+      cancelBtn.addEventListener('click', onCancel);
+      closeBtn.addEventListener('click', onCancel);
+      if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', 'open');
+    });
+  }
+
   function handleFormSubmit(e) {
     e.preventDefault();
     const idInput = $('#cardId');
@@ -465,13 +788,15 @@
     const idInput = $('#cardId');
     const cardId = idInput.value;
     if (!cardId) return;
-    if (!confirm('Delete this card?')) return;
-    const col = findCardColumn(cardId);
-    state.columns[col] = state.columns[col].filter(id => id !== cardId);
-    delete state.cards[cardId];
-    saveState();
-    render();
-    closeModal();
+    openConfirmModal({ title: 'Delete Card', message: 'Are you sure you want to delete this card? This action cannot be undone.', confirmText: 'Delete', cancelText: 'Cancel' }).then((ok) => {
+      if (!ok) return;
+      const col = findCardColumn(cardId);
+      state.columns[col] = state.columns[col].filter(id => id !== cardId);
+      delete state.cards[cardId];
+      saveState();
+      render();
+      closeModal();
+    });
   }
 
   // Export / Import
@@ -511,10 +836,13 @@
   }
 
   function resetToSeed() {
-    if (!confirm('Reset board to the initial seeded content? This will overwrite current data.')) return;
-    state = seedData();
-    saveState();
-    render();
+    openConfirmModal({ title: 'Reset Board', message: 'Reset the board to the initial seeded content? This will overwrite current data.', confirmText: 'Reset', cancelText: 'Cancel' })
+      .then((ok) => {
+        if (!ok) return;
+        state = seedData();
+        saveState();
+        render();
+      });
   }
 
   // Search/filter
@@ -541,14 +869,30 @@
 
   // Event wiring
   function wireUI() {
-    $('#exportBtn').addEventListener('click', exportJson);
-    $('#importInput').addEventListener('change', (e) => {
+    $('#exportBtn').addEventListener('click', async () => { if (await ensureAuth()) exportJson(); });
+    $('#importInput').addEventListener('change', async (e) => {
       const file = e.target.files?.[0];
-      if (file) importJson(file);
+      if (file && await ensureAuth()) importJson(file);
       e.target.value = '';
     });
-    $('#clearBoardBtn').addEventListener('click', resetToSeed);
+    $('#clearBoardBtn').addEventListener('click', async () => { if (await ensureAuth()) resetToSeed(); });
     $('#themeToggle').addEventListener('click', cycleTheme);
+    // JSON link/pull
+    const linkBtn = $('#linkJsonBtn');
+    const pullBtn = $('#pullJsonBtn');
+    linkBtn.addEventListener('click', async () => {
+      if (linkedFileHandle) {
+        if (!(await ensureAuth())) return;
+        await unlinkJsonFile();
+        clearInterval(autoPullTimer);
+        lastFileMtimeMs = 0; lastSyncAtMs = 0; updateLinkedStatus();
+      } else {
+        await linkJsonFile();
+        if (linkedFileHandle) { startAutoPull(); updateLinkedStatus(); }
+      }
+      linkBtn.textContent = linkedFileHandle ? 'Unlink JSON' : 'Link JSON';
+    });
+    pullBtn.addEventListener('click', pullFromLinkedFile);
     const dens = document.getElementById('densityToggle');
     if (dens) dens.addEventListener('click', cycleDensity);
     const search = document.getElementById('searchInput');
@@ -556,7 +900,7 @@
 
     // Modal
     $('#cardForm').addEventListener('submit', handleFormSubmit);
-    $('#deleteCardBtn').addEventListener('click', handleDeleteCard);
+    $('#deleteCardBtn').addEventListener('click', async () => { if (await ensureAuth()) handleDeleteCard(); });
     $('#closeModalBtn').addEventListener('click', closeModal);
     $('#cancelBtn').addEventListener('click', closeModal);
   }
@@ -568,5 +912,21 @@
     state = loadState() || seedData();
     wireUI();
     render();
+    // Try restore linked file handle from IDB
+    if (fsSupported()) {
+      idbGetHandle().then(async (h) => {
+        if (h) {
+          linkedFileHandle = h;
+          $('#pullJsonBtn').disabled = false;
+          $('#linkJsonBtn').textContent = 'Unlink JSON';
+          // Optional: initial pull to ensure sync
+          try {
+            await pullFromLinkedFile();
+          } catch {}
+          updateLinkedStatus();
+          startAutoPull();
+        }
+      });
+    }
   });
 })();
