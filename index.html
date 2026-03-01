@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kaban Board</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="app-title">
+        <span class="logo">▦</span>
+        <h1>Kaban Board</h1>
+      </div>
+      <div class="header-actions">
+        <div class="search-wrap">
+          <span class="search-icon" aria-hidden="true">🔎</span>
+          <input id="searchInput" class="search" type="search" placeholder="Search…" aria-label="Search cards" />
+        </div>
+        <button id="exportBtn" class="btn" title="Export board to JSON" aria-label="Export">
+          <span class="btn-icon" aria-hidden="true">⬇️</span>
+          <span class="btn-text">Export</span>
+        </button>
+        <label class="btn" for="importInput" title="Import board from JSON" aria-label="Import">
+          <span class="btn-icon" aria-hidden="true">⬆️</span>
+          <span class="btn-text">Import</span>
+          <input type="file" id="importInput" accept="application/json" hidden />
+        </label>
+        <button id="clearBoardBtn" class="btn btn-quiet" title="Reset to Seed" aria-label="Reset">
+          <span class="btn-icon" aria-hidden="true">🗘</span>
+          <span class="btn-text">Reset</span>
+        </button>
+        <button id="densityToggle" class="btn btn-icon-only" title="Toggle density" aria-label="Density">
+          <span id="densityIcon" aria-hidden="true">↕️</span>
+        </button>
+        <button id="themeToggle" class="btn btn-icon-only" title="Toggle theme (Light/Dark/Auto)" aria-label="Theme">
+          <span id="themeIcon" aria-hidden="true">🌤️</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="board" id="board" aria-label="Kaban board">
+      <!-- Columns will be rendered here -->
+    </main>
+
+    <!-- Card Modal -->
+    <dialog id="cardModal" class="modal">
+      <form method="dialog" id="cardForm" class="modal-content">
+        <header class="modal-header">
+          <h2 id="modalTitle">Add Card</h2>
+          <button type="button" class="icon-btn" id="closeModalBtn" aria-label="Close">✕</button>
+        </header>
+        <div class="modal-body">
+          <input type="hidden" id="cardId" />
+          <input type="hidden" id="targetColumnId" />
+          <label class="field">
+            <span class="label">Title</span>
+            <input id="titleInput" type="text" required placeholder="Card title" />
+          </label>
+          <div class="field two-col">
+            <label>
+              <span class="label">Difficulty</span>
+              <select id="difficultyInput">
+                <option>Beginner</option>
+                <option>Beginner-Intermediate</option>
+                <option>Intermediate</option>
+                <option>Intermediate-Advanced</option>
+                <option>Advanced</option>
+              </select>
+            </label>
+            <label>
+              <span class="label">Length</span>
+              <input id="lengthInput" type="text" placeholder="e.g., 10-14 mins" />
+            </label>
+          </div>
+          <label class="field">
+            <span class="label">Description</span>
+            <textarea id="descriptionInput" rows="6" placeholder="Details"></textarea>
+          </label>
+        </div>
+        <footer class="modal-footer">
+          <button type="button" id="deleteCardBtn" class="btn btn-danger" hidden>Delete</button>
+          <div class="spacer"></div>
+          <button type="button" class="btn btn-quiet" id="cancelBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="saveBtn">Save</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <template id="columnTemplate">
+      <section class="column" data-column-id="">
+        <header class="column-header">
+          <h3 class="column-title"></h3>
+          <div class="column-tools">
+            <button class="wip-badge btn-quiet" title="Click to set WIP limit" aria-label="Set WIP limit">—</button>
+            <button class="add-card-btn icon-btn" title="Add card" aria-label="Add">＋</button>
+          </div>
+        </header>
+        <div class="dropzone" aria-label="Dropzone" tabindex="0"></div>
+      </section>
+    </template>
+
+    <template id="cardTemplate">
+      <article class="card" draggable="true">
+        <header class="card-header">
+          <h4 class="card-title"></h4>
+        </header>
+      </article>
+    </template>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script src="script.js"></script>
+  </body>
+  </html>
