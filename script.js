@@ -6,6 +6,8 @@
   // Default remote URL; enforced when FORCE_REMOTE is true
   const DEFAULT_REMOTE_URL = 'https://drive-to-json.onrender.com/drive-json?url=https://drive.google.com/file/d/1QevF_ODlGwFcJwmg6l3_6VgKj_MPr-_E/view';
   const FORCE_REMOTE = true;
+  const LOCAL_REV_KEY = 'kaban.localRev.v1';
+  let localRev = parseInt(localStorage.getItem(LOCAL_REV_KEY) || '0', 10) || 0;
   const AUTH_ITERATIONS = 120000;
   // Signing keys (owner): set these to enable cross-device, cross-site owner signing
   // Public key JWK (ECDSA P-256) and encrypted private key blob
@@ -130,9 +132,10 @@
     return 'c_' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-3);
   }
 
-  function saveState() {
+  function saveState(opts = {}) {
+    const { writeLinked = true } = opts;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    scheduleFileSync();
+    if (writeLinked) scheduleFileSync();
   }
 
   function loadState() {
@@ -463,7 +466,8 @@
       }
       if (!data || !data.cards || !data.columns) { if (manual) toast('Invalid board in file'); return; }
       state = data;
-      saveState();
+      // Do not immediately write back when we just read from the file
+      saveState({ writeLinked: false });
       render();
       lastFileMtimeMs = file.lastModified || Date.now();
       lastSyncAtMs = Date.now();
@@ -472,6 +476,8 @@
     } catch { if (manual) toast('Failed to read linked file'); }
   }
 
+  let suppressRemoteUntilMs = 0;
+
   async function writeToLinkedFile() {
     if (!linkedFileHandle) return;
     try {
@@ -479,21 +485,29 @@
         if (!syncSignerPrompted) { syncSignerPrompted = true; const ok = await ensureSigner(); if (!ok) { toast('Sync paused until passphrase is entered.'); return; } }
         else return;
       }
+      const nowIso = new Date().toISOString();
+      // Bump local revision for each write
+      localRev += 1;
+      localStorage.setItem(LOCAL_REV_KEY, String(localRev));
       const writable = await linkedFileHandle.createWritable();
-      const payload = { meta: { exportedAt: new Date().toISOString(), app: 'kaban-board', version: 1 }, data: state };
+      const payload = { meta: { exportedAt: nowIso, app: 'kaban-board', version: 1, rev: localRev }, data: state };
       const canon = canonicalize(payload);
       const sig = await signString(signerKey, canon);
       const backup = { ...payload, sig };
       await writable.write(JSON.stringify(backup, null, 2));
       await writable.close();
       try { const f = await linkedFileHandle.getFile(); lastFileMtimeMs = f.lastModified || Date.now(); } catch {}
-      lastSyncAtMs = Date.now();
+      lastSyncAtMs = Date.parse(nowIso) || Date.now();
+      // Prevent remote from overwriting local within a short window
+      suppressRemoteUntilMs = Date.now() + 30000; // 30s cooldown
       updateLinkedStatus();
     } catch (e) { console.warn('File write failed', e); }
   }
 
   function scheduleFileSync() {
     if (!linkedFileHandle) return;
+    // Block remote overwrite while local changes are being written/signed
+    try { suppressRemoteUntilMs = Math.max(suppressRemoteUntilMs, Date.now() + 30000); } catch {}
     // Write immediately on local state changes
     try { writeToLinkedFile(); } catch {}
   }
@@ -566,6 +580,7 @@
   async function pullRemote(manual = false) {
     if (!remoteUrl) return;
     try {
+      if (Date.now() < suppressRemoteUntilMs) { if (manual) toast('Skipped: awaiting local sync'); return; }
       const res = await fetch(remoteUrl, { mode: 'cors', cache: 'no-cache' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const parsed = await res.json();
@@ -586,7 +601,8 @@
       }
       if (!data || !data.cards || !data.columns) { if (manual) toast('Remote content invalid'); return; }
       state = data;
-      saveState();
+      // Do not write remote-pulled state to linked file
+      saveState({ writeLinked: false });
       render();
       lastRemoteSyncMs = Date.now();
       updateLinkedStatus();
