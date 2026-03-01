@@ -6,10 +6,18 @@
   // Default remote URL; enforced when FORCE_REMOTE is true
   const DEFAULT_REMOTE_URL = 'https://drive-to-json.onrender.com/drive-json?url=https://drive.google.com/file/d/1QevF_ODlGwFcJwmg6l3_6VgKj_MPr-_E/view';
   const FORCE_REMOTE = true;
+  const AUTO_REMOTE_POLL = false; // disable background remote polling
+  const AUTO_LOCAL_PULL = false;  // disable background local file auto-pull
   const LOCAL_REV_KEY = 'kaban.localRev.v1';
+  const LAST_LOCAL_EXPORT_MS_KEY = 'kaban.lastLocalExportMs.v1';
   let localRev = parseInt(localStorage.getItem(LOCAL_REV_KEY) || '0', 10) || 0;
+  let lastLocalExportMsPersisted = parseInt(localStorage.getItem(LAST_LOCAL_EXPORT_MS_KEY) || '0', 10) || 0;
   // When true, skip remote pulls until remote reflects our latest local write
   let awaitingRemoteCatchUp = false;
+  // ExportedAt tracking for status display
+  let localExportedAtMs = lastLocalExportMsPersisted || 0;
+  let remoteExportedAtMs = 0;
+  let remoteRevSeen = 0;
   const AUTH_ITERATIONS = 120000;
   // Signing keys (owner): set these to enable cross-device, cross-site owner signing
   // Public key JWK (ECDSA P-256) and encrypted private key blob
@@ -34,6 +42,9 @@
   let syncSignerPrompted = false;
   let remoteUrl = '';
   let lastRemoteSyncMs = 0;
+  let lastWriteOkAtMs = 0;
+  let lastWriteErr = '';
+  let writeInFlight = false;
 
   // Columns definition
   const columns = [
@@ -138,6 +149,7 @@
     const { writeLinked = true } = opts;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     if (writeLinked) scheduleFileSync();
+    try { console.log('[kaban] saveState:', { writeLinked, linked: !!linkedFileHandle, ts: new Date().toISOString() }); } catch {}
   }
 
   function loadState() {
@@ -473,7 +485,11 @@
       saveState({ writeLinked: false });
       render();
       lastFileMtimeMs = file.lastModified || Date.now();
-      lastSyncAtMs = Date.now();
+      // Prefer exportedAt from file if present; else now
+      const exportedAtMs = Date.parse(parsed?.meta?.exportedAt || 0) || Date.now();
+      lastSyncAtMs = exportedAtMs;
+      localExportedAtMs = exportedAtMs;
+      try { localStorage.setItem(LAST_LOCAL_EXPORT_MS_KEY, String(lastSyncAtMs)); lastLocalExportMsPersisted = lastSyncAtMs; } catch {}
       // If the file contains an exportedAt, wait for remote to reflect it
       const fileExportedAt = Date.parse(parsed?.meta?.exportedAt || 0) || 0;
       if (fileExportedAt) awaitingRemoteCatchUp = true;
@@ -487,32 +503,105 @@
 
   let suppressRemoteUntilMs = 0;
 
-  async function writeToLinkedFile() {
+  async function writeToLinkedFile(_retried = false) {
     if (!linkedFileHandle) return;
     try {
+      if (writeInFlight) return;
+      writeInFlight = true;
       if (!signerKey) {
-        if (!syncSignerPrompted) { syncSignerPrompted = true; const ok = await ensureSigner(); if (!ok) { toast('Sync paused until passphrase is entered.'); return; } }
-        else return;
+        const ok = await ensureSigner();
+        if (!ok) { lastWriteErr = 'Signer locked'; toast('Sync paused until passphrase is entered.'); return; }
       }
+      const perm = await ensureHandlePerms(linkedFileHandle, 'readwrite');
+      if (perm !== 'granted') { lastWriteErr = 'Write permission denied'; toast('Permission to write linked JSON denied.'); return; }
       const nowIso = new Date().toISOString();
       // Bump local revision for each write
       localRev += 1;
       localStorage.setItem(LOCAL_REV_KEY, String(localRev));
-      const writable = await linkedFileHandle.createWritable();
       const payload = { meta: { exportedAt: nowIso, app: 'kaban-board', version: 1, rev: localRev }, data: state };
       const canon = canonicalize(payload);
       const sig = await signString(signerKey, canon);
       const backup = { ...payload, sig };
-      await writable.write(JSON.stringify(backup, null, 2));
-      await writable.close();
+      await writeWithRetry(linkedFileHandle, JSON.stringify(backup, null, 2));
+      lastWriteOkAtMs = Date.now();
+      lastWriteErr = '';
       try { const f = await linkedFileHandle.getFile(); lastFileMtimeMs = f.lastModified || Date.now(); } catch {}
       lastSyncAtMs = Date.parse(nowIso) || Date.now();
+      localExportedAtMs = lastSyncAtMs;
+      try { localStorage.setItem(LAST_LOCAL_EXPORT_MS_KEY, String(lastSyncAtMs)); lastLocalExportMsPersisted = lastSyncAtMs; } catch {}
       // Prevent remote from overwriting local within a short window
       suppressRemoteUntilMs = Date.now() + 30000; // 30s cooldown
       // Hold off accepting remote until it reflects this write
       awaitingRemoteCatchUp = true;
       updateLinkedStatus();
-    } catch (e) { console.warn('File write failed', e); }
+      try { console.log('[kaban] writeToLinkedFile: success', { exportedAt: nowIso, rev: localRev, ts: new Date().toISOString() }); } catch {}
+    } catch (e) {
+      console.warn('File write failed', e);
+      lastWriteErr = e?.name || 'Write failed';
+      // If the handle became stale (common on cloud-backed folders), let user reselect and retry once
+      if (e && e.name === 'InvalidStateError' && !_retried) {
+        try {
+          console.log('[kaban] attempting to reselect linked file due to InvalidStateError');
+          const ok = await reselectLinkedFile();
+          if (ok) {
+            console.log('[kaban] reselected file handle; retrying write');
+            await writeToLinkedFile(true);
+          }
+        } catch {}
+      }
+    }
+    finally { writeInFlight = false; }
+  }
+
+  async function writeWithRetry(handle, content, attempts = 2) {
+    let lastErr;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        const writable = await handle.createWritable({ keepExistingData: false });
+        // Explicitly truncate to be safe across platforms
+        if (typeof writable.truncate === 'function') {
+          try { await writable.truncate(0); } catch {}
+        }
+        if (typeof writable.seek === 'function') {
+          try { await writable.seek(0); } catch {}
+        }
+        await writable.write(content);
+        await writable.close();
+        return;
+      } catch (e) {
+        lastErr = e;
+        // Retry briefly on InvalidStateError or transient errors
+        await new Promise(r => setTimeout(r, 150));
+      }
+    }
+    throw lastErr || new Error('Write failed');
+  }
+
+  async function reselectLinkedFile() {
+    if (!fsSupported()) return false;
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        multiple: false,
+        types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }],
+      });
+      if (!handle) return false;
+      linkedFileHandle = handle;
+      await idbSetHandle(handle);
+      return true;
+    } catch { return false; }
+  }
+
+  async function ensureHandlePerms(handle, mode = 'readwrite') {
+    try {
+      const opts = { mode };
+      const q = await handle.queryPermission(opts);
+      if (q === 'granted') return q;
+      if (q === 'prompt') {
+        const r = await handle.requestPermission(opts);
+        return r;
+      }
+      return q; // 'denied'
+    } catch (e) { return 'denied'; }
   }
 
   function scheduleFileSync() {
@@ -578,7 +667,7 @@
     document.getElementById('remotePullBtn').disabled = !remoteUrl;
     const remotePullMobile = document.getElementById('remotePullMobile');
     if (remotePullMobile) remotePullMobile.disabled = !remoteUrl;
-    startRemotePolling();
+    if (AUTO_REMOTE_POLL) startRemotePolling();
   }
 
   function startRemotePolling(intervalMs = 15000) {
@@ -591,21 +680,23 @@
     if (!remoteUrl) return;
     try {
       if (Date.now() < suppressRemoteUntilMs) { if (manual) toast('Skipped: awaiting local sync'); return; }
-      const res = await fetch(remoteUrl, { mode: 'cors', cache: 'no-cache' });
+      const bust = (remoteUrl.includes('?') ? '&' : '?') + '_ts=' + Date.now();
+      const res = await fetch(remoteUrl + bust, { mode: 'cors', cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const parsed = await res.json();
       const data = parsed?.data || parsed;
       const remoteRev = Number(parsed?.meta?.rev || 0);
       // If we recently wrote locally, avoid overwriting with an older remote
       const remoteTs = Date.parse(parsed?.meta?.exportedAt || 0) || 0;
-      if ((remoteRev && remoteRev < localRev) || (lastSyncAtMs && remoteTs && remoteTs < lastSyncAtMs)) {
+      const lastLocal = Math.max(lastSyncAtMs || 0, lastLocalExportMsPersisted || 0);
+      if ((remoteRev && remoteRev < localRev) || (lastLocal && remoteTs && remoteTs <= lastLocal)) {
         // Remote is older than our last local write; skip to prevent flicker
         if (manual) toast('Skipped: remote is older than local');
         return;
       }
       // If we're waiting for remote to catch up, only accept once it matches or exceeds our last write
       if (awaitingRemoteCatchUp) {
-        const okByTime = lastSyncAtMs ? (remoteTs >= lastSyncAtMs) : true;
+        const okByTime = lastSyncAtMs ? (remoteTs > Math.max(lastSyncAtMs, lastLocalExportMsPersisted || 0)) : true;
         const okByRev = remoteRev ? (remoteRev >= localRev) : true;
         if (!(okByTime && okByRev)) { if (manual) toast('Waiting for remote to catch up'); return; }
         awaitingRemoteCatchUp = false;
@@ -624,6 +715,8 @@
       render();
       lastRemoteSyncMs = Date.now();
       if (remoteRev) { localRev = remoteRev; localStorage.setItem(LOCAL_REV_KEY, String(localRev)); }
+      remoteExportedAtMs = remoteTs;
+      remoteRevSeen = remoteRev || remoteRevSeen;
       updateLinkedStatus();
       if (manual) toast('Pulled from remote');
     } catch (e) {
@@ -636,12 +729,13 @@
     if (!el) return;
     const parts = [];
     if (linkedFileHandle) {
-      const last = lastSyncAtMs ? new Date(lastSyncAtMs).toLocaleTimeString() : '—';
-      parts.push(`Linked • ${last}`);
+      const last = localExportedAtMs ? new Date(localExportedAtMs).toLocaleTimeString() : '—';
+      const mark = lastWriteErr ? '⚠️' : (lastWriteOkAtMs ? '✓' : '•');
+      parts.push(`Local r${localRev || 0} • ${last} ${mark}`);
     }
     if (remoteUrl) {
-      const lastR = lastRemoteSyncMs ? new Date(lastRemoteSyncMs).toLocaleTimeString() : '—';
-      parts.push(`Remote • ${lastR}`);
+      const lastR = remoteExportedAtMs ? new Date(remoteExportedAtMs).toLocaleTimeString() : '—';
+      parts.push(`Remote r${remoteRevSeen || 0} • ${lastR}`);
     }
     if (!parts.length) { el.classList.add('hidden'); el.textContent = ''; return; }
     el.textContent = parts.join(' | ');
@@ -851,6 +945,18 @@
       target.splice(toIndex, 0, cardId);
     }
     saveState();
+    try {
+      console.log('[kaban] moveCard: state updated', {
+        cardId,
+        from: fromCol,
+        to: toCol,
+        index: toIndex,
+        toColOrder: state.columns[toCol].slice(),
+        fromColOrder: fromCol && fromCol !== toCol ? state.columns[fromCol].slice() : undefined,
+        linked: !!linkedFileHandle,
+        ts: new Date().toISOString(),
+      });
+    } catch {}
     // No full re-render needed; DOM already matches order from dragover logic
     // Update WIP badge counts for both source and destination
     updateWipBadge(toCol);
@@ -1199,6 +1305,11 @@
     initTheme();
     initDensity();
     state = loadState() || seedData();
+    // Restore last local export time for freshness checks
+    try {
+      const persisted = parseInt(localStorage.getItem(LAST_LOCAL_EXPORT_MS_KEY) || '0', 10) || 0;
+      if (persisted) { lastSyncAtMs = persisted; lastLocalExportMsPersisted = persisted; }
+    } catch {}
     wireUI();
     render();
     // Try restore linked file handle from IDB
@@ -1214,7 +1325,6 @@
             await pullFromLinkedFile();
           } catch {}
           updateLinkedStatus();
-          startAutoPull();
         }
       });
     }
@@ -1226,7 +1336,6 @@
           const pullBtn = document.getElementById('pullJsonBtn');
           if (pullBtn) pullBtn.disabled = false;
           await pullFromLinkedFile(true);
-          startAutoPullLocal();
           updateLinkedStatus();
         }
       });
@@ -1235,19 +1344,12 @@
     if (FORCE_REMOTE) {
       setRemoteUrl(DEFAULT_REMOTE_URL);
       updateLinkedStatus();
-      pullRemote(true);
+      // No auto remote pull; use Remote Pull button
     } else {
       // Restore remote URL (or fall back to default)
       const savedRemote = localStorage.getItem(REMOTE_URL_KEY) || '';
-      if (savedRemote) {
-        setRemoteUrl(savedRemote);
-        updateLinkedStatus();
-        pullRemote(true);
-      } else if (DEFAULT_REMOTE_URL) {
-        setRemoteUrl(DEFAULT_REMOTE_URL);
-        updateLinkedStatus();
-        pullRemote(true);
-      }
+      if (savedRemote) { setRemoteUrl(savedRemote); updateLinkedStatus(); }
+      else if (DEFAULT_REMOTE_URL) { setRemoteUrl(DEFAULT_REMOTE_URL); updateLinkedStatus(); }
     }
   });
 })();
