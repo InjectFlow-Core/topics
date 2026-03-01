@@ -425,7 +425,7 @@
     toast('Unlinked JSON file.');
   }
 
-  async function pullFromLinkedFile() {
+  async function pullFromLinkedFile(manual = false) {
     if (!linkedFileHandle) return;
     try {
       const file = await linkedFileHandle.getFile();
@@ -437,7 +437,21 @@
         const payload = { meta: parsed.meta || {}, data };
         const canon = canonicalize(payload);
         const ok = parsed.sig && await verifyString(pub, canon, parsed.sig);
-        if (!ok) { toast('Signature invalid; refusing to load'); return; }
+        if (!ok) {
+          if (manual && await ensureSigner()) {
+            const proceed = await openConfirmModal({ title: 'Adopt Unsigned File', message: 'Linked file signature is invalid. Trust current content and re-sign with your key?', confirmText: 'Adopt & Sign', cancelText: 'Cancel' });
+            if (!proceed) return;
+            state = data;
+            saveState();
+            await writeToLinkedFile();
+            render();
+            toast('Adopted and re-signed linked file');
+          } else {
+            // Silent in auto mode to avoid modal loops
+            if (manual) toast('Signature invalid; refusing to load');
+          }
+          return;
+        }
       }
       if (!data || !data.cards || !data.columns) { toast('Invalid board in file'); return; }
       state = data;
@@ -865,7 +879,19 @@
             const payload = { meta: parsed.meta || {}, data };
             const canon = canonicalize(payload);
             const ok = parsed.sig && await verifyString(pub, canon, parsed.sig);
-            if (!ok) throw new Error('Signature verification failed');
+            if (!ok) {
+              // Allow owner to override for legacy/unsigned files
+              if (await ensureSigner()) {
+                const proceed = await openConfirmModal({ title: 'Import Unsigned File', message: 'Signature is missing or invalid. Import and re-sign this file with your key?', confirmText: 'Import & Sign', cancelText: 'Cancel' });
+                if (!proceed) return;
+                state = data;
+                saveState();
+                render();
+                toast('Imported and trusted (will be signed on next write)');
+                return;
+              }
+              throw new Error('Signature verification failed');
+            }
             state = data;
             saveState();
             render();
@@ -948,7 +974,7 @@
       }
       linkBtn.textContent = linkedFileHandle ? 'Unlink JSON' : 'Link JSON';
     });
-    pullBtn.addEventListener('click', pullFromLinkedFile);
+    pullBtn.addEventListener('click', () => pullFromLinkedFile(true));
     const dens = document.getElementById('densityToggle');
     if (dens) dens.addEventListener('click', cycleDensity);
     const search = document.getElementById('searchInput');
