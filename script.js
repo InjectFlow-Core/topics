@@ -4,7 +4,7 @@
   const DENSITY_KEY = 'kaban.density.v1';
   const REMOTE_URL_KEY = 'kaban.remoteUrl.v1';
   // Default remote URL; enforced when FORCE_REMOTE is true
-  const DEFAULT_REMOTE_URL = 'https://drive-to-json.onrender.com/drive-json?url=https://drive.google.com/file/d/1QevF_ODlGwFcJwmg6l3_6VgKj_MPr-_E/view';
+  const DEFAULT_REMOTE_URL = 'https://drive-to-json.onrender.com/api/state';
   const FORCE_REMOTE = true;
   const AUTO_REMOTE_POLL = false; // disable background remote polling
   const AUTO_LOCAL_PULL = false;  // disable background local file auto-pull
@@ -19,6 +19,9 @@
   let remoteExportedAtMs = 0;
   let remoteRevSeen = 0;
   const AUTH_ITERATIONS = 120000;
+  // Server push endpoint (same origin or absolute). If set, client will push on every save.
+  const SERVER_PUSH_URL = 'https://drive-to-json.onrender.com/api/state';
+  const ENABLE_SERVER_PUSH = true;
   // Signing keys (owner): set these to enable cross-device, cross-site owner signing
   // Public key JWK (ECDSA P-256) and encrypted private key blob
   // Example placeholders – replace with your generated values
@@ -32,11 +35,8 @@
   let state = null;
   // Removed legacy per-browser code auth; we use signing only now
   let signerKey = null; // CryptoKey private key cached for session
-  // Local linked JSON (optional two-way sync)
-  let linkedFileHandle = null; // FileSystemFileHandle if JSON sync is linked
+  // Local file sync removed; using server push
   let fileSyncTimer = null;
-  let autoPullTimer = null;
-  let lastFileMtimeMs = 0;
   let lastSyncAtMs = 0;
   let remoteTimer = null;
   let syncSignerPrompted = false;
@@ -149,7 +149,8 @@
     const { writeLinked = true } = opts;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     if (writeLinked) scheduleFileSync();
-    try { console.log('[kaban] saveState:', { writeLinked, linked: !!linkedFileHandle, ts: new Date().toISOString() }); } catch {}
+    try { console.log('[kaban] saveState:', { writeLinked, ts: new Date().toISOString() }); } catch {}
+    if (ENABLE_SERVER_PUSH && SERVER_PUSH_URL) scheduleServerPush();
   }
 
   function loadState() {
@@ -219,7 +220,6 @@
   // --- Minimal Auth (client-side, encrypted verifier) ---
   const te = new TextEncoder();
   const td = new TextDecoder();
-  // Legacy marker removed (no per-browser code auth)
 
   function bufToB64(buf) {
     const bytes = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array(buf.buffer ?? buf);
@@ -244,8 +244,6 @@
       ['encrypt', 'decrypt']
     );
   }
-
-  // Legacy per-browser code functions removed
 
   // ----- Signing helpers (ECDSA P-256) -----
   async function importPubKey() {
@@ -278,8 +276,6 @@
     }
     return JSON.stringify(value);
   }
-
-  // Legacy ensureAuth removed; we use ensureSigner()
 
   async function ensureSigner() {
     const secure = !!(window.isSecureContext && crypto?.subtle);
@@ -383,48 +379,7 @@
     }
   }
 
-  // ---------- JSON File Sync (File System Access API) ----------
-  const IDB_DB = 'kaban-idb';
-  const IDB_STORE = 'handles';
-
-  function idbOpen() {
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open(IDB_DB, 1);
-      req.onupgradeneeded = () => {
-        const db = req.result;
-        if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE, { keyPath: 'key' });
-      };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
-  }
-  async function idbSetHandle(handle) {
-    const db = await idbOpen();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, 'readwrite');
-      tx.objectStore(IDB_STORE).put({ key: 'stateFile', handle });
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-  async function idbGetHandle() {
-    const db = await idbOpen();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, 'readonly');
-      const req = tx.objectStore(IDB_STORE).get('stateFile');
-      req.onsuccess = () => resolve(req.result?.handle || null);
-      req.onerror = () => reject(req.error);
-    });
-  }
-  async function idbDeleteHandle() {
-    const db = await idbOpen();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, 'readwrite');
-      tx.objectStore(IDB_STORE).delete('stateFile');
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
+  // ---------- Local file sync removed ----------
 
   function fsSupported() { return 'showOpenFilePicker' in window || 'showSaveFilePicker' in window; }
 
@@ -502,12 +457,19 @@
   }
 
   let suppressRemoteUntilMs = 0;
+  // writeend pattern: if a write is in flight, set this flag instead of
+  // starting a second concurrent write. When the current write finishes it
+  // checks the flag and immediately starts another write with the latest state.
+  // This mirrors the SO writeend event pattern for the File System Access API.
+  let writePending = false;
 
-  async function writeToLinkedFile(_retried = false) {
+  async function writeToLinkedFile() {
     if (!linkedFileHandle) return;
+    // A write is already running; mark that we need another one when it ends.
+    if (writeInFlight) { writePending = true; return; }
+    writeInFlight = true;
+    writePending = false;
     try {
-      if (writeInFlight) return;
-      writeInFlight = true;
       if (!signerKey) {
         const ok = await ensureSigner();
         if (!ok) { lastWriteErr = 'Signer locked'; toast('Sync paused until passphrase is entered.'); return; }
@@ -515,7 +477,6 @@
       const perm = await ensureHandlePerms(linkedFileHandle, 'readwrite');
       if (perm !== 'granted') { lastWriteErr = 'Write permission denied'; toast('Permission to write linked JSON denied.'); return; }
       const nowIso = new Date().toISOString();
-      // Bump local revision for each write
       localRev += 1;
       localStorage.setItem(LOCAL_REV_KEY, String(localRev));
       const payload = { meta: { exportedAt: nowIso, app: 'kaban-board', version: 1, rev: localRev }, data: state };
@@ -529,36 +490,32 @@
       lastSyncAtMs = Date.parse(nowIso) || Date.now();
       localExportedAtMs = lastSyncAtMs;
       try { localStorage.setItem(LAST_LOCAL_EXPORT_MS_KEY, String(lastSyncAtMs)); lastLocalExportMsPersisted = lastSyncAtMs; } catch {}
-      // Prevent remote from overwriting local within a short window
-      suppressRemoteUntilMs = Date.now() + 30000; // 30s cooldown
-      // Hold off accepting remote until it reflects this write
+      suppressRemoteUntilMs = Date.now() + 30000;
       awaitingRemoteCatchUp = true;
       updateLinkedStatus();
       try { console.log('[kaban] writeToLinkedFile: success', { exportedAt: nowIso, rev: localRev, ts: new Date().toISOString() }); } catch {}
     } catch (e) {
       console.warn('File write failed', e);
       lastWriteErr = e?.name || 'Write failed';
-      // If the handle became stale (common on cloud-backed folders), let user reselect and retry once
-      if (e && e.name === 'InvalidStateError' && !_retried) {
-        try {
-          console.log('[kaban] attempting to reselect linked file due to InvalidStateError');
-          const ok = await reselectLinkedFile();
-          if (ok) {
-            console.log('[kaban] reselected file handle; retrying write');
-            await writeToLinkedFile(true);
-          }
-        } catch {}
-      }
+      updateLinkedStatus();
+    } finally {
+      writeInFlight = false;
+      // writeend: if state changed while we were writing, do one more write now
+      // that the stream is fully closed.
+      if (writePending) writeToLinkedFile();
     }
-    finally { writeInFlight = false; }
   }
 
-  async function writeWithRetry(handle, content, attempts = 2) {
+  async function writeWithRetry(handle, content, attempts = 3) {
     let lastErr;
     for (let i = 0; i < attempts; i++) {
       try {
+        // Calling getFile() before createWritable() refreshes the handle's
+        // internally cached state. This resolves InvalidStateError on
+        // cloud-backed folders (e.g. Google Drive) where the file metadata
+        // changed since the handle was first opened.
+        await handle.getFile();
         const writable = await handle.createWritable({ keepExistingData: false });
-        // Explicitly truncate to be safe across platforms
         if (typeof writable.truncate === 'function') {
           try { await writable.truncate(0); } catch {}
         }
@@ -570,8 +527,7 @@
         return;
       } catch (e) {
         lastErr = e;
-        // Retry briefly on InvalidStateError or transient errors
-        await new Promise(r => setTimeout(r, 150));
+        await new Promise(r => setTimeout(r, 200));
       }
     }
     throw lastErr || new Error('Write failed');
@@ -604,12 +560,37 @@
     } catch (e) { return 'denied'; }
   }
 
-  function scheduleFileSync() {
-    if (!linkedFileHandle) return;
-    // Block remote overwrite while local changes are being written/signed
-    try { suppressRemoteUntilMs = Math.max(suppressRemoteUntilMs, Date.now() + 30000); } catch {}
-    // Write immediately on local state changes
-    try { writeToLinkedFile(); } catch {}
+  function scheduleFileSync() { /* no-op: local file sync removed */ }
+
+  // --- Server push (POST signed payload to server) ---
+  let pushTimer = null;
+  function scheduleServerPush() {
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(pushRemote, 250);
+  }
+  async function pushRemote() {
+    try {
+      if (!signerKey) { const ok = await ensureSigner(); if (!ok) { toast('Push paused until passphrase is entered.'); return; } }
+      const nowIso = new Date().toISOString();
+      const payload = { meta: { exportedAt: nowIso, app: 'kaban-board', version: 1, rev: localRev || 0 }, data: state };
+      const canon = canonicalize(payload);
+      const sig = await signString(signerKey, canon);
+      const body = JSON.stringify({ ...payload, sig });
+      const res = await fetch(SERVER_PUSH_URL, { method:'POST', mode:'cors', headers:{ 'Content-Type':'application/json' }, body });
+      if (!res.ok) { console.warn('[kaban] pushRemote failed', res.status); return; }
+      const j = await res.json().catch(() => ({}));
+      console.log('[kaban] pushRemote ok', j?.meta || {});
+      // Update local and remote status to reflect server acceptance
+      const acceptedAt = j?.meta?.exportedAt || nowIso;
+      const ms = Date.parse(acceptedAt) || Date.now();
+      lastSyncAtMs = ms;
+      localExportedAtMs = ms;
+      remoteExportedAtMs = ms;
+      const acceptedRev = (j?.meta?.rev != null) ? Number(j.meta.rev) : (localRev || 0);
+      remoteRevSeen = acceptedRev;
+      try { localStorage.setItem(LAST_LOCAL_EXPORT_MS_KEY, String(ms)); } catch {}
+      updateLinkedStatus();
+    } catch (e) { console.warn('[kaban] pushRemote error', e); }
   }
 
   function startAutoPullLocal(intervalMs = 15000) {
@@ -619,48 +600,6 @@
 
   // ---------- Remote Source (read-only via Remote URL) ----------
 
-  function idbOpen() {
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open(IDB_DB, 1);
-      req.onupgradeneeded = () => {
-        const db = req.result;
-        if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE, { keyPath: 'key' });
-      };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
-  }
-  async function idbSetHandle(handle) {
-    const db = await idbOpen();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, 'readwrite');
-      tx.objectStore(IDB_STORE).put({ key: 'stateFile', handle });
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-  async function idbGetHandle() {
-    const db = await idbOpen();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, 'readonly');
-      const req = tx.objectStore(IDB_STORE).get('stateFile');
-      req.onsuccess = () => resolve(req.result?.handle || null);
-      req.onerror = () => reject(req.error);
-    });
-  }
-  async function idbDeleteHandle() {
-    const db = await idbOpen();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, 'readwrite');
-      tx.objectStore(IDB_STORE).delete('stateFile');
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  // Local link/persist removed. Use Remote URL features below.
-
-  // ---------- Remote URL (read-only) ----------
   function setRemoteUrl(url) {
     remoteUrl = (url || '').trim();
     localStorage.setItem(REMOTE_URL_KEY, remoteUrl);
@@ -681,21 +620,17 @@
     try {
       if (Date.now() < suppressRemoteUntilMs) { if (manual) toast('Skipped: awaiting local sync'); return; }
       const bust = (remoteUrl.includes('?') ? '&' : '?') + '_ts=' + Date.now();
-      // Avoid custom headers and request cache options to prevent CORS preflight; rely on query bust only
       const res = await fetch(remoteUrl + bust, { mode: 'cors' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const parsed = await res.json();
       const data = parsed?.data || parsed;
       const remoteRev = Number(parsed?.meta?.rev || 0);
-      // If we recently wrote locally, avoid overwriting with an older remote
       const remoteTs = Date.parse(parsed?.meta?.exportedAt || 0) || 0;
       const lastLocal = Math.max(lastSyncAtMs || 0, lastLocalExportMsPersisted || 0);
       if ((remoteRev && remoteRev < localRev) || (lastLocal && remoteTs && remoteTs <= lastLocal)) {
-        // Remote is older than our last local write; skip to prevent flicker
         if (manual) toast('Skipped: remote is older than local');
         return;
       }
-      // If we're waiting for remote to catch up, only accept once it matches or exceeds our last write
       if (awaitingRemoteCatchUp) {
         const okByTime = lastSyncAtMs ? (remoteTs > Math.max(lastSyncAtMs, lastLocalExportMsPersisted || 0)) : true;
         const okByRev = remoteRev ? (remoteRev >= localRev) : true;
@@ -711,7 +646,6 @@
       }
       if (!data || !data.cards || !data.columns) { if (manual) toast('Remote content invalid'); return; }
       state = data;
-      // Do not write remote-pulled state to linked file
       saveState({ writeLinked: false });
       render();
       lastRemoteSyncMs = Date.now();
@@ -729,37 +663,17 @@
     const el = document.getElementById('linkedStatus');
     if (!el) return;
     const parts = [];
-    if (linkedFileHandle) {
-      const last = localExportedAtMs ? new Date(localExportedAtMs).toLocaleTimeString() : '—';
-      const mark = lastWriteErr ? '⚠️' : (lastWriteOkAtMs ? '✓' : '•');
-      parts.push(`Local r${localRev || 0} • ${last} ${mark}`);
-    }
+    const last = localExportedAtMs ? new Date(localExportedAtMs).toLocaleTimeString() : '—';
+    parts.push(`Local r${localRev || 0} • ${last}`);
     if (remoteUrl) {
       const lastR = remoteExportedAtMs ? new Date(remoteExportedAtMs).toLocaleTimeString() : '—';
       parts.push(`Remote r${remoteRevSeen || 0} • ${lastR}`);
     }
-    if (!parts.length) { el.classList.add('hidden'); el.textContent = ''; return; }
     el.textContent = parts.join(' | ');
     el.classList.remove('hidden');
   }
 
-  function startAutoPull(intervalMs = 15000) {
-    if (!linkedFileHandle) return;
-    clearInterval(autoPullTimer);
-    autoPullTimer = setInterval(async () => {
-      if (Date.now() < suppressRemoteUntilMs) return; // respect cooldown after local write
-      try {
-        const f = await linkedFileHandle.getFile();
-        const mtime = f.lastModified || Date.now();
-        if (mtime > lastFileMtimeMs + 1000) {
-          await pullFromLinkedFile();
-        }
-      } catch (e) {
-        // Permission loss or read error; stop auto pull
-        clearInterval(autoPullTimer);
-      }
-    }, intervalMs);
-  }
+  // startAutoPull removed (local file auto-pull no longer used)
 
   function renderColumn(col) {
     const tpl = $('#columnTemplate');
@@ -954,12 +868,9 @@
         index: toIndex,
         toColOrder: state.columns[toCol].slice(),
         fromColOrder: fromCol && fromCol !== toCol ? state.columns[fromCol].slice() : undefined,
-        linked: !!linkedFileHandle,
-        ts: new Date().toISOString(),
+         ts: new Date().toISOString(),
       });
     } catch {}
-    // No full re-render needed; DOM already matches order from dragover logic
-    // Update WIP badge counts for both source and destination
     updateWipBadge(toCol);
     if (fromCol && fromCol !== toCol) updateWipBadge(fromCol);
   }
@@ -1101,7 +1012,6 @@
     const payload = { meta: { exportedAt: new Date().toISOString(), app: 'kaban-board', version: 1 }, data: state };
     const canon = canonicalize(payload);
     if (!signerKey) { toast('Signer unavailable'); return; }
-    // Sign and attach
     const sigPromise = signString(signerKey, canon);
     const out = { ...payload };
     sigPromise.then(sig => {
@@ -1121,8 +1031,7 @@
     reader.onload = () => {
       try {
         const parsed = JSON.parse(reader.result);
-        const data = parsed?.data || parsed; // signed wrapper expected
-        // Verify signature if present and pubkey configured
+        const data = parsed?.data || parsed;
         if (SIGN_PUB_JWK) {
           const pubVerify = importPubKey();
           Promise.resolve(pubVerify).then(async (pub) => {
@@ -1131,7 +1040,6 @@
             const canon = canonicalize(payload);
             const ok = parsed.sig && await verifyString(pub, canon, parsed.sig);
             if (!ok) {
-              // Allow owner to override for legacy/unsigned files
               if (await ensureSigner()) {
                 const proceed = await openConfirmModal({ title: 'Import Unsigned File', message: 'Signature is missing or invalid. Import and re-sign this file with your key?', confirmText: 'Import & Sign', cancelText: 'Cancel' });
                 if (!proceed) return;
@@ -1150,7 +1058,6 @@
           return;
         }
         if (!data || !data.cards || !data.columns) throw new Error('Invalid structure');
-        // Basic shape checks
         for (const col of ['todo','inprogress','review','done']) {
           if (!Array.isArray(data.columns[col])) throw new Error('Missing column: ' + col);
         }
@@ -1199,7 +1106,6 @@
   // Event wiring
   function wireUI() {
     $('#exportBtn').addEventListener('click', async () => { if (await ensureSigner()) exportJson(); });
-    // Gate import before opening picker
     const importBtn = document.getElementById('importBtn');
     if (importBtn) importBtn.addEventListener('click', async (e) => { e.preventDefault(); if (await ensureSigner()) document.getElementById('importInput').click(); });
     $('#importInput').addEventListener('change', async (e) => {
@@ -1209,7 +1115,6 @@
     });
     $('#clearBoardBtn').addEventListener('click', async () => { if (await ensureSigner()) resetToSeed(); });
     $('#themeToggle').addEventListener('click', cycleTheme);
-    // Local link/pull
     const linkBtn = document.getElementById('linkJsonBtn');
     const pullBtn = document.getElementById('pullJsonBtn');
     if (linkBtn) linkBtn.addEventListener('click', async () => {
@@ -1221,8 +1126,6 @@
         await linkJsonFile();
       }
     });
-    // Pull button removed from UI; background sync and manual remote pull remain
-    // Remote UI
     const remoteBtn = document.getElementById('remoteBtn');
     const remotePullBtn = document.getElementById('remotePullBtn');
     if (remoteBtn) {
@@ -1262,7 +1165,6 @@
     if (search) search.addEventListener('input', (e) => setQuery(e.target.value));
 
     // Modal
-    // Adding/editing cards does not require signing; only destructive/global actions do
     $('#cardForm').addEventListener('submit', handleFormSubmit);
     $('#deleteCardBtn').addEventListener('click', async () => { if (await ensureSigner()) handleDeleteCard(); });
     $('#closeModalBtn').addEventListener('click', closeModal);
@@ -1281,19 +1183,13 @@
         if (action === 'export') { if (await ensureSigner()) exportJson(); }
         if (action === 'import') { if (await ensureSigner()) document.getElementById('importInputMobile').click(); }
         if (action === 'reset') { if (await ensureSigner()) resetToSeed(); }
-        if (action === 'link') {
-          const linkBtn = document.getElementById('linkJsonBtn');
-          if (linkedFileHandle) { if (await ensureSigner()) await unlinkJsonFile(); }
-          else { if (await ensureSigner()) await linkJsonFile(); }
-        }
-        // Pull/Remote actions removed from mobile menu
+        // Link/Unlink removed
         if (action === 'remote-pull') { pullRemote(true); }
         if (action === 'density') { cycleDensity(); }
         if (action === 'theme') { cycleTheme(); }
       });
       const importMobile = document.getElementById('importInputMobile');
       if (importMobile) importMobile.addEventListener('change', async (e) => { const file = e.target.files?.[0]; if (file && await ensureSigner()) importJson(file); e.target.value=''; });
-      // Pull mobile button removed
       const remotePullMobile = document.getElementById('remotePullMobile');
       if (remotePullMobile) remotePullMobile.disabled = !remoteUrl;
     }
@@ -1301,53 +1197,21 @@
 
   // Boot
   window.addEventListener('DOMContentLoaded', () => {
-    // Ensure all dialogs start closed (avoid invisible overlays)
     ['cardModal','authModal','confirmModal','menuModal'].forEach(id => { const d=document.getElementById(id); if (d && d.open) try{ d.close(); }catch{} });
     initTheme();
     initDensity();
     state = loadState() || seedData();
-    // Restore last local export time for freshness checks
     try {
       const persisted = parseInt(localStorage.getItem(LAST_LOCAL_EXPORT_MS_KEY) || '0', 10) || 0;
       if (persisted) { lastSyncAtMs = persisted; lastLocalExportMsPersisted = persisted; }
     } catch {}
     wireUI();
     render();
-    // Try restore linked file handle from IDB
-    if (fsSupported()) {
-      idbGetHandle().then(async (h) => {
-        if (h) {
-          linkedFileHandle = h;
-          const pb = document.getElementById('pullJsonBtn');
-          if (pb) pb.disabled = false;
-          $('#linkJsonBtn').textContent = 'Unlink JSON';
-          // Optional: initial pull to ensure sync
-          try {
-            await pullFromLinkedFile();
-          } catch {}
-          updateLinkedStatus();
-        }
-      });
-    }
-    // Try restore linked file handle from IDB
-    if (fsSupported()) {
-      idbGetHandle().then(async (h) => {
-        if (h) {
-          linkedFileHandle = h;
-          const pullBtn = document.getElementById('pullJsonBtn');
-          if (pullBtn) pullBtn.disabled = false;
-          await pullFromLinkedFile(true);
-          updateLinkedStatus();
-        }
-      });
-    }
-    // Enforce remote URL as single source of truth
+    // Local file linking removed; nothing to restore
     if (FORCE_REMOTE) {
       setRemoteUrl(DEFAULT_REMOTE_URL);
       updateLinkedStatus();
-      // No auto remote pull; use Remote Pull button
     } else {
-      // Restore remote URL (or fall back to default)
       const savedRemote = localStorage.getItem(REMOTE_URL_KEY) || '';
       if (savedRemote) { setRemoteUrl(savedRemote); updateLinkedStatus(); }
       else if (DEFAULT_REMOTE_URL) { setRemoteUrl(DEFAULT_REMOTE_URL); updateLinkedStatus(); }

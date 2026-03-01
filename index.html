@@ -38,8 +38,7 @@
           <button type="button" id="importBtn" class="px-3 py-1.5 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-100 text-sm pointer-events-auto" title="Import board from JSON" aria-label="Import">Import</button>
           <input type="file" id="importInput" accept="application/json" hidden />
           <button type="button" id="clearBoardBtn" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 pointer-events-auto" title="Reset to Seed" aria-label="Reset">Reset</button>
-          <button type="button" id="linkJsonBtn" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 pointer-events-auto" title="Link a JSON file for local sync" aria-label="Link JSON">Link JSON</button>
-          <!-- Pull and Remote buttons removed; remote pulls run in background. -->
+          <!-- Local file linking removed; server push is the source of truth. -->
           <button type="button" id="remotePullBtn" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200" title="Pull from Remote URL" aria-label="Remote Pull" disabled>Remote Pull</button>
           <span id="linkedStatus" class="hidden sm:inline text-xs text-slate-500 dark:text-slate-400 ml-1"></span>
           <button type="button" id="densityToggle" class="w-9 h-9 grid place-items-center rounded-md border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 pointer-events-auto" title="Toggle density" aria-label="Density">
@@ -176,7 +175,7 @@
         <button class="px-3 py-2 rounded-md bg-slate-200 dark:bg-slate-700 text-sm" data-action="import">Import</button>
         <input type="file" id="importInputMobile" accept="application/json" hidden />
         <button class="px-3 py-2 rounded-md border text-sm" data-action="reset">Reset</button>
-        <button class="px-3 py-2 rounded-md border text-sm" data-action="link">Link/Unlink JSON</button>
+        <!-- Link/Unlink JSON removed; using server push -->
         <!-- Pull and Remote URL actions removed; remote pulls happen automatically. -->
         <button class="px-3 py-2 rounded-md border text-sm" data-action="remote-pull" id="remotePullMobile" disabled>Remote Pull</button>
         <button class="px-3 py-2 rounded-md border text-sm" data-action="density">Toggle Density</button>
