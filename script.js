@@ -494,11 +494,11 @@
 
   function scheduleFileSync() {
     if (!linkedFileHandle) return;
-    clearTimeout(fileSyncTimer);
-    fileSyncTimer = setTimeout(writeToLinkedFile, 500);
+    // Write immediately on local state changes
+    try { writeToLinkedFile(); } catch {}
   }
 
-  function startAutoPullLocal(intervalMs = 12000) {
+  function startAutoPullLocal(intervalMs = 15000) {
     if (!linkedFileHandle) return;
     clearInterval(autoPullTimer);
     autoPullTimer = setInterval(() => pullFromLinkedFile(false), intervalMs);
@@ -557,7 +557,7 @@
     startRemotePolling();
   }
 
-  function startRemotePolling(intervalMs = 12000) {
+  function startRemotePolling(intervalMs = 15000) {
     clearInterval(remoteTimer);
     if (!remoteUrl) return;
     remoteTimer = setInterval(() => pullRemote(false), intervalMs);
@@ -570,6 +570,13 @@
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const parsed = await res.json();
       const data = parsed?.data || parsed;
+      // If we recently wrote locally, avoid overwriting with an older remote
+      const remoteTs = Date.parse(parsed?.meta?.exportedAt || 0) || 0;
+      if (lastSyncAtMs && remoteTs && remoteTs < lastSyncAtMs) {
+        // Remote is older than our last local write; skip to prevent flicker
+        if (manual) toast('Skipped: remote is older than local');
+        return;
+      }
       if (SIGN_PUB_JWK) {
         const pub = await importPubKey();
         const payload = { meta: parsed.meta || {}, data };
@@ -606,7 +613,7 @@
     el.classList.remove('hidden');
   }
 
-  function startAutoPull(intervalMs = 12000) {
+  function startAutoPull(intervalMs = 15000) {
     if (!linkedFileHandle) return;
     clearInterval(autoPullTimer);
     autoPullTimer = setInterval(async () => {
