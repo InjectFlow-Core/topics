@@ -2,6 +2,10 @@
   const STORAGE_KEY = 'kaban.board.v1';
   const THEME_KEY = 'kaban.theme.v1';
   const DENSITY_KEY = 'kaban.density.v1';
+  const REMOTE_URL_KEY = 'kaban.remoteUrl.v1';
+  // Default remote URL; enforced when FORCE_REMOTE is true
+  const DEFAULT_REMOTE_URL = 'https://drive-to-json.onrender.com/drive-json?url=https://drive.google.com/file/d/1QevF_ODlGwFcJwmg6l3_6VgKj_MPr-_E/view';
+  const FORCE_REMOTE = true;
   const AUTH_ITERATIONS = 120000;
   // Signing keys (owner): set these to enable cross-device, cross-site owner signing
   // Public key JWK (ECDSA P-256) and encrypted private key blob
@@ -16,12 +20,16 @@
   let state = null;
   // Removed legacy per-browser code auth; we use signing only now
   let signerKey = null; // CryptoKey private key cached for session
+  // Local linked JSON (optional two-way sync)
   let linkedFileHandle = null; // FileSystemFileHandle if JSON sync is linked
   let fileSyncTimer = null;
   let autoPullTimer = null;
   let lastFileMtimeMs = 0;
   let lastSyncAtMs = 0;
+  let remoteTimer = null;
   let syncSignerPrompted = false;
+  let remoteUrl = '';
+  let lastRemoteSyncMs = 0;
 
   // Columns definition
   const columns = [
@@ -412,17 +420,30 @@
       });
       linkedFileHandle = handle;
       await idbSetHandle(handle);
-      $('#pullJsonBtn').disabled = false;
+      const pullBtn = document.getElementById('pullJsonBtn');
+      if (pullBtn) pullBtn.disabled = false;
+      const linkBtn = document.getElementById('linkJsonBtn');
+      if (linkBtn) linkBtn.textContent = 'Unlink JSON';
+      const pullMobile = document.getElementById('pullMobile');
+      if (pullMobile) pullMobile.disabled = false;
       toast('Linked JSON file.');
-      // optional: pull initial state from file
-      await pullFromLinkedFile();
-    } catch (e) { /* user cancelled */ }
+      await pullFromLinkedFile(true);
+      startAutoPullLocal();
+      updateLinkedStatus();
+    } catch (e) { /* cancelled */ }
   }
 
   async function unlinkJsonFile() {
     linkedFileHandle = null;
     await idbDeleteHandle();
-    $('#pullJsonBtn').disabled = true;
+    const pullBtn = document.getElementById('pullJsonBtn');
+    if (pullBtn) pullBtn.disabled = true;
+    const linkBtn = document.getElementById('linkJsonBtn');
+    if (linkBtn) linkBtn.textContent = 'Link JSON';
+    const pullMobile = document.getElementById('pullMobile');
+    if (pullMobile) pullMobile.disabled = true;
+    clearInterval(autoPullTimer);
+    lastFileMtimeMs = 0; lastSyncAtMs = 0; updateLinkedStatus();
     toast('Unlinked JSON file.');
   }
 
@@ -438,47 +459,25 @@
         const payload = { meta: parsed.meta || {}, data };
         const canon = canonicalize(payload);
         const ok = parsed.sig && await verifyString(pub, canon, parsed.sig);
-        if (!ok) {
-          if (manual && await ensureSigner()) {
-            const proceed = await openConfirmModal({ title: 'Adopt Unsigned File', message: 'Linked file signature is invalid. Trust current content and re-sign with your key?', confirmText: 'Adopt & Sign', cancelText: 'Cancel' });
-            if (!proceed) return;
-            state = data;
-            saveState();
-            await writeToLinkedFile();
-            render();
-            toast('Adopted and re-signed linked file');
-          } else {
-            // Silent in auto mode to avoid modal loops
-            if (manual) toast('Signature invalid; refusing to load');
-          }
-          return;
-        }
+        if (!ok) { if (manual) toast('Linked file signature invalid'); return; }
       }
-      if (!data || !data.cards || !data.columns) { toast('Invalid board in file'); return; }
+      if (!data || !data.cards || !data.columns) { if (manual) toast('Invalid board in file'); return; }
       state = data;
       saveState();
       render();
-      toast('Pulled state from JSON');
-      lastFileMtimeMs = file.lastModified || Date.parse(file.lastModifiedDate || '') || Date.now();
+      lastFileMtimeMs = file.lastModified || Date.now();
       lastSyncAtMs = Date.now();
       updateLinkedStatus();
-    } catch (e) {
-      toast('Failed to read linked file');
-    }
+      if (manual) toast('Pulled from linked file');
+    } catch { if (manual) toast('Failed to read linked file'); }
   }
 
   async function writeToLinkedFile() {
     if (!linkedFileHandle) return;
     try {
       if (!signerKey) {
-        // Try to unlock signer once to enable global sync silently
-        if (!syncSignerPrompted) {
-          syncSignerPrompted = true;
-          const ok = await ensureSigner();
-          if (!ok) { toast('Sync paused until passphrase is entered.'); return; }
-        } else {
-          return; // Avoid repeated prompts; keep local until user triggers a protected action
-        }
+        if (!syncSignerPrompted) { syncSignerPrompted = true; const ok = await ensureSigner(); if (!ok) { toast('Sync paused until passphrase is entered.'); return; } }
+        else return;
       }
       const writable = await linkedFileHandle.createWritable();
       const payload = { meta: { exportedAt: new Date().toISOString(), app: 'kaban-board', version: 1 }, data: state };
@@ -487,17 +486,10 @@
       const backup = { ...payload, sig };
       await writable.write(JSON.stringify(backup, null, 2));
       await writable.close();
-      // Refresh file metadata to capture new mtime
-      try {
-        const f = await linkedFileHandle.getFile();
-        lastFileMtimeMs = f.lastModified || Date.now();
-      } catch {}
+      try { const f = await linkedFileHandle.getFile(); lastFileMtimeMs = f.lastModified || Date.now(); } catch {}
       lastSyncAtMs = Date.now();
       updateLinkedStatus();
-    } catch (e) {
-      // If permission lost or fail, disable link
-      console.warn('File write failed', e);
-    }
+    } catch (e) { console.warn('File write failed', e); }
   }
 
   function scheduleFileSync() {
@@ -506,12 +498,111 @@
     fileSyncTimer = setTimeout(writeToLinkedFile, 500);
   }
 
+  function startAutoPullLocal(intervalMs = 12000) {
+    if (!linkedFileHandle) return;
+    clearInterval(autoPullTimer);
+    autoPullTimer = setInterval(() => pullFromLinkedFile(false), intervalMs);
+  }
+
+  // ---------- Remote Source (read-only via Remote URL) ----------
+
+  function idbOpen() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(IDB_DB, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE, { keyPath: 'key' });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function idbSetHandle(handle) {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put({ key: 'stateFile', handle });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  async function idbGetHandle() {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const req = tx.objectStore(IDB_STORE).get('stateFile');
+      req.onsuccess = () => resolve(req.result?.handle || null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function idbDeleteHandle() {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).delete('stateFile');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  // Local link/persist removed. Use Remote URL features below.
+
+  // ---------- Remote URL (read-only) ----------
+  function setRemoteUrl(url) {
+    remoteUrl = (url || '').trim();
+    localStorage.setItem(REMOTE_URL_KEY, remoteUrl);
+    document.getElementById('remotePullBtn').disabled = !remoteUrl;
+    const remotePullMobile = document.getElementById('remotePullMobile');
+    if (remotePullMobile) remotePullMobile.disabled = !remoteUrl;
+    startRemotePolling();
+  }
+
+  function startRemotePolling(intervalMs = 12000) {
+    clearInterval(remoteTimer);
+    if (!remoteUrl) return;
+    remoteTimer = setInterval(() => pullRemote(false), intervalMs);
+  }
+
+  async function pullRemote(manual = false) {
+    if (!remoteUrl) return;
+    try {
+      const res = await fetch(remoteUrl, { mode: 'cors', cache: 'no-cache' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const parsed = await res.json();
+      const data = parsed?.data || parsed;
+      if (SIGN_PUB_JWK) {
+        const pub = await importPubKey();
+        const payload = { meta: parsed.meta || {}, data };
+        const canon = canonicalize(payload);
+        const ok = parsed.sig && await verifyString(pub, canon, parsed.sig);
+        if (!ok) { if (manual) toast('Remote signature invalid'); return; }
+      }
+      if (!data || !data.cards || !data.columns) { if (manual) toast('Remote content invalid'); return; }
+      state = data;
+      saveState();
+      render();
+      lastRemoteSyncMs = Date.now();
+      updateLinkedStatus();
+      if (manual) toast('Pulled from remote');
+    } catch (e) {
+      if (manual) toast('Remote pull failed');
+    }
+  }
+
   function updateLinkedStatus() {
     const el = document.getElementById('linkedStatus');
     if (!el) return;
-    if (!linkedFileHandle) { el.classList.add('hidden'); el.textContent = ''; return; }
-    const last = lastSyncAtMs ? new Date(lastSyncAtMs).toLocaleTimeString() : '—';
-    el.textContent = `Linked • Last sync ${last}`;
+    const parts = [];
+    if (linkedFileHandle) {
+      const last = lastSyncAtMs ? new Date(lastSyncAtMs).toLocaleTimeString() : '—';
+      parts.push(`Linked • ${last}`);
+    }
+    if (remoteUrl) {
+      const lastR = lastRemoteSyncMs ? new Date(lastRemoteSyncMs).toLocaleTimeString() : '—';
+      parts.push(`Remote • ${lastR}`);
+    }
+    if (!parts.length) { el.classList.add('hidden'); el.textContent = ''; return; }
+    el.textContent = parts.join(' | ');
     el.classList.remove('hidden');
   }
 
@@ -968,23 +1059,53 @@
     });
     $('#clearBoardBtn').addEventListener('click', async () => { if (await ensureSigner()) resetToSeed(); });
     $('#themeToggle').addEventListener('click', cycleTheme);
-    // JSON link/pull
-    const linkBtn = $('#linkJsonBtn');
-    const pullBtn = $('#pullJsonBtn');
-    linkBtn.addEventListener('click', async () => {
+    // Local link/pull
+    const linkBtn = document.getElementById('linkJsonBtn');
+    const pullBtn = document.getElementById('pullJsonBtn');
+    if (linkBtn) linkBtn.addEventListener('click', async () => {
       if (linkedFileHandle) {
         if (!(await ensureSigner())) return;
         await unlinkJsonFile();
-        clearInterval(autoPullTimer);
-        lastFileMtimeMs = 0; lastSyncAtMs = 0; updateLinkedStatus();
       } else {
         if (!(await ensureSigner())) return;
         await linkJsonFile();
-        if (linkedFileHandle) { startAutoPull(); updateLinkedStatus(); }
       }
-      linkBtn.textContent = linkedFileHandle ? 'Unlink JSON' : 'Link JSON';
     });
-    pullBtn.addEventListener('click', () => pullFromLinkedFile(true));
+    // Pull button removed from UI; background sync and manual remote pull remain
+    // Remote UI
+    const remoteBtn = document.getElementById('remoteBtn');
+    const remotePullBtn = document.getElementById('remotePullBtn');
+    if (remoteBtn) {
+      if (FORCE_REMOTE) {
+        remoteBtn.disabled = true;
+        remoteBtn.title = 'Remote URL is managed centrally';
+      } else {
+        remoteBtn.addEventListener('click', async () => {
+          if (!(await ensureSigner())) return;
+          const dlg = document.getElementById('remoteModal');
+          const input = document.getElementById('remoteUrlInput');
+          const err = document.getElementById('remoteErr');
+          input.value = remoteUrl || '';
+          err.classList.add('hidden');
+          const form = document.getElementById('remoteForm');
+          const cancel = document.getElementById('cancelRemoteBtn');
+          const close = document.getElementById('closeRemoteBtn');
+          function cleanup() {
+            form.removeEventListener('submit', onSubmit);
+            cancel.removeEventListener('click', onCancel);
+            close.removeEventListener('click', onCancel);
+            if (dlg.open) dlg.close();
+          }
+          function onCancel(){ cleanup(); }
+          function onSubmit(e){ e.preventDefault(); const url=input.value.trim(); if (!url){ err.textContent='Please enter a URL'; err.classList.remove('hidden'); return; } setRemoteUrl(url); cleanup(); toast('Remote URL saved'); }
+          form.addEventListener('submit', onSubmit);
+          cancel.addEventListener('click', onCancel);
+          close.addEventListener('click', onCancel);
+          if (typeof dlg.showModal==='function') dlg.showModal(); else dlg.setAttribute('open','open');
+        });
+      }
+    }
+    if (remotePullBtn) remotePullBtn.addEventListener('click', () => pullRemote(true));
     const dens = document.getElementById('densityToggle');
     if (dens) dens.addEventListener('click', cycleDensity);
     const search = document.getElementById('searchInput');
@@ -1012,22 +1133,19 @@
         if (action === 'reset') { if (await ensureSigner()) resetToSeed(); }
         if (action === 'link') {
           const linkBtn = document.getElementById('linkJsonBtn');
-          if (linkedFileHandle) { if (await ensureSigner()) { await unlinkJsonFile(); clearInterval(autoPullTimer); lastFileMtimeMs=0; lastSyncAtMs=0; updateLinkedStatus(); linkBtn.textContent='Link JSON'; } }
-          else { if (await ensureSigner()) { await linkJsonFile(); if (linkedFileHandle){ startAutoPull(); updateLinkedStatus(); linkBtn.textContent='Unlink JSON'; } } }
+          if (linkedFileHandle) { if (await ensureSigner()) await unlinkJsonFile(); }
+          else { if (await ensureSigner()) await linkJsonFile(); }
         }
-        if (action === 'pull') { pullFromLinkedFile(); }
+        // Pull/Remote actions removed from mobile menu
+        if (action === 'remote-pull') { pullRemote(true); }
         if (action === 'density') { cycleDensity(); }
         if (action === 'theme') { cycleTheme(); }
       });
       const importMobile = document.getElementById('importInputMobile');
       if (importMobile) importMobile.addEventListener('change', async (e) => { const file = e.target.files?.[0]; if (file && await ensureSigner()) importJson(file); e.target.value=''; });
-      const pullMobile = document.getElementById('pullMobile');
-      if (pullMobile) {
-        const sync = () => { pullMobile.disabled = !linkedFileHandle; };
-        const pullBtn = document.getElementById('pullJsonBtn');
-        if (pullBtn) new MutationObserver(sync).observe(pullBtn, { attributes:true, attributeFilter:['disabled'] });
-        sync();
-      }
+      // Pull mobile button removed
+      const remotePullMobile = document.getElementById('remotePullMobile');
+      if (remotePullMobile) remotePullMobile.disabled = !remoteUrl;
     }
   }
 
@@ -1045,7 +1163,8 @@
       idbGetHandle().then(async (h) => {
         if (h) {
           linkedFileHandle = h;
-          $('#pullJsonBtn').disabled = false;
+          const pb = document.getElementById('pullJsonBtn');
+          if (pb) pb.disabled = false;
           $('#linkJsonBtn').textContent = 'Unlink JSON';
           // Optional: initial pull to ensure sync
           try {
@@ -1055,6 +1174,37 @@
           startAutoPull();
         }
       });
+    }
+    // Try restore linked file handle from IDB
+    if (fsSupported()) {
+      idbGetHandle().then(async (h) => {
+        if (h) {
+          linkedFileHandle = h;
+          const pullBtn = document.getElementById('pullJsonBtn');
+          if (pullBtn) pullBtn.disabled = false;
+          await pullFromLinkedFile(true);
+          startAutoPullLocal();
+          updateLinkedStatus();
+        }
+      });
+    }
+    // Enforce remote URL as single source of truth
+    if (FORCE_REMOTE) {
+      setRemoteUrl(DEFAULT_REMOTE_URL);
+      updateLinkedStatus();
+      pullRemote(true);
+    } else {
+      // Restore remote URL (or fall back to default)
+      const savedRemote = localStorage.getItem(REMOTE_URL_KEY) || '';
+      if (savedRemote) {
+        setRemoteUrl(savedRemote);
+        updateLinkedStatus();
+        pullRemote(true);
+      } else if (DEFAULT_REMOTE_URL) {
+        setRemoteUrl(DEFAULT_REMOTE_URL);
+        updateLinkedStatus();
+        pullRemote(true);
+      }
     }
   });
 })();
