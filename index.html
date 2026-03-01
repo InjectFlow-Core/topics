@@ -57,45 +57,71 @@
     </main>
 
     <!-- Card Modal -->
-    <dialog id="cardModal" class="modal bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 sm:w-[92vw] sm:max-w-3xl sm:h-auto sm:rounded-xl">
+    <dialog id="cardModal" class="modal bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 sm:w-[92vw] sm:max-w-4xl sm:h-auto sm:rounded-xl">
       <form method="dialog" id="cardForm" class="modal-content flex flex-col">
-        <header class="modal-header flex items-center justify-between px-3 sm:px-4 py-2 sm:py-2.5 border-b border-slate-200 dark:border-slate-700">
-          <h2 id="modalTitle" class="font-semibold text-base">Add Card</h2>
-          <button type="button" class="icon-btn text-slate-500" id="closeModalBtn" aria-label="Close">✕</button>
+        <!-- Accent bar -->
+        <div class="h-1 w-full bg-primary/80 rounded-t-xl"></div>
+        <header class="modal-header flex items-center justify-between px-3 sm:px-5 py-3 border-b border-slate-200 dark:border-slate-700">
+          <div class="flex items-center gap-2">
+            <span aria-hidden="true">🗂️</span>
+            <div class="leading-tight">
+              <h2 id="modalTitle" class="font-semibold text-base">Add Card</h2>
+              <p class="text-[11px] text-slate-500 dark:text-slate-400">Edit details and properties</p>
+            </div>
+          </div>
+          <button type="button" class="icon-btn text-slate-500 hover:text-slate-700 dark:hover:text-slate-200" id="closeModalBtn" aria-label="Close">✕</button>
         </header>
-        <div class="modal-body p-4 grid gap-3">
+        <div class="modal-body p-4 sm:p-5 grid gap-4 sm:grid-cols-5">
           <input type="hidden" id="cardId" />
           <input type="hidden" id="targetColumnId" />
-          <label class="field grid gap-1">
-            <span class="label text-xs text-slate-500">Title</span>
-            <input id="titleInput" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm" type="text" required placeholder="Card title" />
-          </label>
-          <div class="field grid grid-cols-2 gap-2.5">
-            <label class="grid gap-1">
-              <span class="label text-xs text-slate-500">Difficulty</span>
-              <select id="difficultyInput" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm">
-                <option>Beginner</option>
-                <option>Beginner-Intermediate</option>
-                <option>Intermediate</option>
-                <option>Intermediate-Advanced</option>
-                <option>Advanced</option>
-              </select>
+          <!-- Left: main content -->
+          <section class="sm:col-span-3 grid gap-3">
+            <label class="field grid gap-1">
+              <span class="label text-xs text-slate-500 flex items-center gap-1"><span>📝</span> Title</span>
+              <input id="titleInput" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 outline-none" type="text" required placeholder="Summarize the task or topic" />
             </label>
-            <label class="grid gap-1">
-              <span class="label text-xs text-slate-500">Length</span>
-              <input id="lengthInput" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm" type="text" placeholder="e.g., 10-14 mins" />
+            <label class="field grid gap-1">
+              <span class="label text-xs text-slate-500 flex items-center gap-1"><span>🧾</span> Description <span class="ml-1 text-[11px] text-slate-400">(plain text; keep it concise)</span></span>
+              <textarea id="descriptionInput" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 outline-none min-h-[140px]" rows="6" placeholder="Add context, acceptance criteria, links…"></textarea>
             </label>
-          </div>
-          <label class="field grid gap-1">
-            <span class="label text-xs text-slate-500">Description</span>
-            <textarea id="descriptionInput" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm" rows="6" placeholder="Details"></textarea>
-          </label>
+          </section>
+          <!-- Right: properties sidebar -->
+          <aside class="sm:col-span-2 grid gap-3">
+            <div class="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/40 p-3">
+              <h3 class="font-medium text-sm mb-2 flex items-center gap-2 text-slate-700 dark:text-slate-200"><span>⚙️</span> Properties</h3>
+              <div class="grid gap-2.5">
+                <label class="grid gap-1">
+                  <span class="label text-xs text-slate-500 flex items-center gap-1"><span>🎯</span> Difficulty</span>
+                  <select id="difficultyInput" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm">
+                    <option>Beginner</option>
+                    <option>Beginner-Intermediate</option>
+                    <option>Intermediate</option>
+                    <option>Intermediate-Advanced</option>
+                    <option>Advanced</option>
+                  </select>
+                </label>
+                <label class="grid gap-1">
+                  <span class="label text-xs text-slate-500 flex items-center gap-1"><span>⏱️</span> Length</span>
+                  <input id="lengthInput" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm" type="text" placeholder="e.g., 10-14 mins" />
+                </label>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/40 p-3">
+              <h3 class="font-medium text-sm mb-1 text-slate-700 dark:text-slate-200">Tips</h3>
+              <ul class="text-[12px] leading-relaxed text-slate-600 dark:text-slate-300 list-disc ml-4">
+                <li>Keep titles short and scannable.</li>
+                <li>Use description for context and links.</li>
+                <li>Set difficulty and length for quick planning.</li>
+              </ul>
+            </div>
+          </aside>
         </div>
-        <footer class="modal-footer flex items-center gap-2 px-4 py-3 border-t border-slate-200 dark:border-slate-700">
+        <footer class="modal-footer flex items-center gap-2 px-4 sm:px-5 py-3 border-t border-slate-200 dark:border-slate-700">
           <button type="button" id="deleteCardBtn" class="px-3 py-1.5 rounded-md bg-rose-500 text-white text-sm" hidden>Delete</button>
           <div class="flex-1"></div>
+          <span class="hidden sm:inline text-[11px] text-slate-400">Esc to close • ⌘/Ctrl + Enter to save</span>
           <button type="button" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600" id="cancelBtn">Cancel</button>
-          <button type="submit" class="px-3 py-1.5 rounded-md bg-primary text-white text-sm" id="saveBtn">Save</button>
+          <button type="submit" class="px-3 py-1.5 rounded-md bg-primary text-white text-sm shadow-soft" id="saveBtn">Save</button>
         </footer>
       </form>
     </dialog>
