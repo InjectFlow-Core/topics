@@ -618,25 +618,11 @@
   async function pullRemote(manual = false) {
     if (!remoteUrl) return;
     try {
-      if (Date.now() < suppressRemoteUntilMs) { if (manual) toast('Skipped: awaiting local sync'); return; }
       const bust = (remoteUrl.includes('?') ? '&' : '?') + '_ts=' + Date.now();
       const res = await fetch(remoteUrl + bust, { mode: 'cors' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const parsed = await res.json();
       const data = parsed?.data || parsed;
-      const remoteRev = Number(parsed?.meta?.rev || 0);
-      const remoteTs = Date.parse(parsed?.meta?.exportedAt || 0) || 0;
-      const lastLocal = Math.max(lastSyncAtMs || 0, lastLocalExportMsPersisted || 0);
-      if ((remoteRev && remoteRev < localRev) || (lastLocal && remoteTs && remoteTs <= lastLocal)) {
-        if (manual) toast('Skipped: remote is older than local');
-        return;
-      }
-      if (awaitingRemoteCatchUp) {
-        const okByTime = lastSyncAtMs ? (remoteTs > Math.max(lastSyncAtMs, lastLocalExportMsPersisted || 0)) : true;
-        const okByRev = remoteRev ? (remoteRev >= localRev) : true;
-        if (!(okByTime && okByRev)) { if (manual) toast('Waiting for remote to catch up'); return; }
-        awaitingRemoteCatchUp = false;
-      }
       if (SIGN_PUB_JWK) {
         const pub = await importPubKey();
         const payload = { meta: parsed.meta || {}, data };
@@ -645,15 +631,18 @@
         if (!ok) { if (manual) toast('Remote signature invalid'); return; }
       }
       if (!data || !data.cards || !data.columns) { if (manual) toast('Remote content invalid'); return; }
+      // Server is the single source of truth: always adopt server state
       state = data;
       saveState({ writeLinked: false });
       render();
+      const remoteRev = Number(parsed?.meta?.rev || 0);
+      const remoteTs = Date.parse(parsed?.meta?.exportedAt || 0) || Date.now();
       lastRemoteSyncMs = Date.now();
-      if (remoteRev) { localRev = remoteRev; localStorage.setItem(LOCAL_REV_KEY, String(localRev)); }
+      if (remoteRev) { localRev = remoteRev; try { localStorage.setItem(LOCAL_REV_KEY, String(localRev)); } catch {} }
       remoteExportedAtMs = remoteTs;
       remoteRevSeen = remoteRev || remoteRevSeen;
       updateLinkedStatus();
-      if (manual) toast('Pulled from remote');
+      if (manual) toast('Pulled from server');
     } catch (e) {
       if (manual) toast('Remote pull failed');
     }
@@ -662,14 +651,8 @@
   function updateLinkedStatus() {
     const el = document.getElementById('linkedStatus');
     if (!el) return;
-    const parts = [];
-    const last = localExportedAtMs ? new Date(localExportedAtMs).toLocaleTimeString() : '—';
-    parts.push(`Local r${localRev || 0} • ${last}`);
-    if (remoteUrl) {
-      const lastR = remoteExportedAtMs ? new Date(remoteExportedAtMs).toLocaleTimeString() : '—';
-      parts.push(`Remote r${remoteRevSeen || 0} • ${lastR}`);
-    }
-    el.textContent = parts.join(' | ');
+    const lastR = remoteExportedAtMs ? new Date(remoteExportedAtMs).toLocaleTimeString() : '—';
+    el.textContent = `Server r${remoteRevSeen || 0} • ${lastR}`;
     el.classList.remove('hidden');
   }
 
