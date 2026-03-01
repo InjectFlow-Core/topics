@@ -21,6 +21,7 @@
   let autoPullTimer = null;
   let lastFileMtimeMs = 0;
   let lastSyncAtMs = 0;
+  let syncSignerPrompted = false;
 
   // Columns definition
   const columns = [
@@ -469,7 +470,16 @@
   async function writeToLinkedFile() {
     if (!linkedFileHandle) return;
     try {
-      if (!signerKey) { toast('Signer required to write JSON'); return; }
+      if (!signerKey) {
+        // Try to unlock signer once to enable global sync silently
+        if (!syncSignerPrompted) {
+          syncSignerPrompted = true;
+          const ok = await ensureSigner();
+          if (!ok) { toast('Sync paused until passphrase is entered.'); return; }
+        } else {
+          return; // Avoid repeated prompts; keep local until user triggers a protected action
+        }
+      }
       const writable = await linkedFileHandle.createWritable();
       const payload = { meta: { exportedAt: new Date().toISOString(), app: 'kaban-board', version: 1 }, data: state };
       const canon = canonicalize(payload);
