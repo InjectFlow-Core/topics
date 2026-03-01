@@ -453,6 +453,7 @@
   async function pullFromLinkedFile(manual = false) {
     if (!linkedFileHandle) return;
     try {
+      if (Date.now() < suppressRemoteUntilMs && !manual) return; // avoid overwriting local during cooldown
       const file = await linkedFileHandle.getFile();
       const text = await file.text();
       const parsed = JSON.parse(text);
@@ -516,9 +517,8 @@
   }
 
   function startAutoPullLocal(intervalMs = 15000) {
-    if (!linkedFileHandle) return;
-    clearInterval(autoPullTimer);
-    autoPullTimer = setInterval(() => pullFromLinkedFile(false), intervalMs);
+    // Delegate to mtime-aware, cooldown-respecting pull
+    startAutoPull(intervalMs);
   }
 
   // ---------- Remote Source (read-only via Remote URL) ----------
@@ -638,6 +638,7 @@
     if (!linkedFileHandle) return;
     clearInterval(autoPullTimer);
     autoPullTimer = setInterval(async () => {
+      if (Date.now() < suppressRemoteUntilMs) return; // respect cooldown after local write
       try {
         const f = await linkedFileHandle.getFile();
         const mtime = f.lastModified || Date.now();
