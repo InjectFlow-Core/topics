@@ -33,21 +33,22 @@
           <span aria-hidden="true">🔎</span>
           <input id="searchInput" class="bg-transparent outline-none text-sm text-slate-700 dark:text-slate-200 placeholder-slate-400 w-56" type="search" placeholder="Search…" aria-label="Search cards" />
         </div>
-        <button id="exportBtn" class="px-3 py-1.5 rounded-md bg-primary text-white text-sm shadow-soft" title="Export board to JSON" aria-label="Export">Export</button>
-        <label class="px-3 py-1.5 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-100 text-sm cursor-pointer" for="importInput" title="Import board from JSON" aria-label="Import">
-          Import
+        <div class="hidden md:flex items-center gap-2" id="headerActions">
+          <button type="button" id="exportBtn" class="px-3 py-1.5 rounded-md bg-primary text-white text-sm shadow-soft pointer-events-auto" title="Export board to JSON" aria-label="Export">Export</button>
+          <button type="button" id="importBtn" class="px-3 py-1.5 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-100 text-sm pointer-events-auto" title="Import board from JSON" aria-label="Import">Import</button>
           <input type="file" id="importInput" accept="application/json" hidden />
-        </label>
-        <button id="clearBoardBtn" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200" title="Reset to Seed" aria-label="Reset">Reset</button>
-        <button id="linkJsonBtn" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200" title="Link a JSON file for sync" aria-label="Link JSON">Link JSON</button>
-        <button id="pullJsonBtn" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200" title="Pull state from linked JSON" aria-label="Pull JSON" disabled>Pull</button>
-        <span id="linkedStatus" class="hidden sm:inline text-xs text-slate-500 dark:text-slate-400 ml-1"></span>
-        <button id="densityToggle" class="w-9 h-9 grid place-items-center rounded-md border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300" title="Toggle density" aria-label="Density">
-          <span id="densityIcon" aria-hidden="true">↕️</span>
-        </button>
-        <button id="themeToggle" class="w-9 h-9 grid place-items-center rounded-md border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300" title="Toggle theme (Light/Dark/Auto)" aria-label="Theme">
-          <span id="themeIcon" aria-hidden="true">🌤️</span>
-        </button>
+          <button type="button" id="clearBoardBtn" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 pointer-events-auto" title="Reset to Seed" aria-label="Reset">Reset</button>
+          <button type="button" id="linkJsonBtn" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 pointer-events-auto" title="Link a JSON file for sync" aria-label="Link JSON">Link JSON</button>
+          <button type="button" id="pullJsonBtn" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 pointer-events-auto" title="Pull state from linked JSON" aria-label="Pull JSON" disabled>Pull</button>
+          <span id="linkedStatus" class="hidden sm:inline text-xs text-slate-500 dark:text-slate-400 ml-1"></span>
+          <button type="button" id="densityToggle" class="w-9 h-9 grid place-items-center rounded-md border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 pointer-events-auto" title="Toggle density" aria-label="Density">
+            <span id="densityIcon" aria-hidden="true">↕️</span>
+          </button>
+          <button type="button" id="themeToggle" class="w-9 h-9 grid place-items-center rounded-md border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 pointer-events-auto" title="Toggle theme (Light/Dark/Auto)" aria-label="Theme">
+            <span id="themeIcon" aria-hidden="true">🌤️</span>
+          </button>
+        </div>
+        <button type="button" id="mobileMenuBtn" class="md:hidden w-10 h-10 grid place-items-center rounded-md border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300" aria-label="Menu">☰</button>
       </div>
     </header>
 
@@ -121,17 +122,17 @@
     <dialog id="authModal" class="modal bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 sm:w-[92vw] sm:max-w-sm sm:h-auto sm:rounded-xl">
       <form method="dialog" id="authForm" class="flex flex-col">
         <header class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
-          <h2 id="authTitle" class="font-semibold">Security Code</h2>
+          <h2 id="authTitle" class="font-semibold">Passphrase</h2>
           <button type="button" class="text-slate-500" id="closeAuthBtn" aria-label="Close">✕</button>
         </header>
         <div class="p-4 grid gap-3">
           <p id="authHint" class="text-sm text-slate-500"></p>
           <label class="grid gap-1">
-            <span class="text-xs text-slate-500">Code</span>
+            <span class="text-xs text-slate-500">Passphrase</span>
             <input id="authCode" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm" type="password" autocomplete="current-password" />
           </label>
           <label id="authConfirmWrap" class="grid gap-1 hidden">
-            <span class="text-xs text-slate-500">Confirm Code</span>
+            <span class="text-xs text-slate-500">Confirm Passphrase</span>
             <input id="authCodeConfirm" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm" type="password" autocomplete="new-password" />
           </label>
           <p id="authError" class="hidden text-xs text-rose-600"></p>
@@ -166,6 +167,21 @@
     </template>
 
     <div id="toast" class="toast fixed left-1/2 -translate-x-1/2 bottom-4 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 shadow-soft opacity-0 pointer-events-none transition" role="status" aria-live="polite"></div>
+
+    <!-- Mobile Menu Modal -->
+    <dialog id="menuModal" class="modal bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 sm:max-w-sm sm:h-auto sm:rounded-xl">
+      <div class="p-4 grid gap-2">
+        <button class="px-3 py-2 rounded-md bg-primary text-white text-sm" data-action="export">Export</button>
+        <button class="px-3 py-2 rounded-md bg-slate-200 dark:bg-slate-700 text-sm" data-action="import">Import</button>
+        <input type="file" id="importInputMobile" accept="application/json" hidden />
+        <button class="px-3 py-2 rounded-md border text-sm" data-action="reset">Reset</button>
+        <button class="px-3 py-2 rounded-md border text-sm" data-action="link">Link/Unlink JSON</button>
+        <button class="px-3 py-2 rounded-md border text-sm" data-action="pull" id="pullMobile" disabled>Pull</button>
+        <button class="px-3 py-2 rounded-md border text-sm" data-action="density">Toggle Density</button>
+        <button class="px-3 py-2 rounded-md border text-sm" data-action="theme">Toggle Theme</button>
+        <button class="px-3 py-2 rounded-md border text-sm" data-action="close">Close</button>
+      </div>
+    </dialog>
 
     <script src="script.js"></script>
   </body>

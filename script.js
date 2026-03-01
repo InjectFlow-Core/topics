@@ -2,15 +2,20 @@
   const STORAGE_KEY = 'kaban.board.v1';
   const THEME_KEY = 'kaban.theme.v1';
   const DENSITY_KEY = 'kaban.density.v1';
-  const AUTH_STORE_KEY = 'kaban.auth.v1';
   const AUTH_ITERATIONS = 120000;
+  // Signing keys (owner): set these to enable cross-device, cross-site owner signing
+  // Public key JWK (ECDSA P-256) and encrypted private key blob
+  // Example placeholders – replace with your generated values
+  const SIGN_PUB_JWK = {"key_ops":["verify"],"ext":true,"kty":"EC","x":"Cb7zcKgMmZ9aswDkPa6KKGc2siMIimjaGrKXWyUqwW4","y":"fkbznjZz-DUNGFHPvsuJ0AtXBbknB29LZlh1g1jM_yk","crv":"P-256"};
+  const SIGN_PRIV_BLOB = {"kdf":{"iter":120000,"salt":"VDy6RR5epUJ/Obvy2y3LkA=="},"iv":"R9MD6aHPT1k7UPeU","ct":"lEntKmhJ8XqTr6baBW8vjaJuhkC58pyeC6E0ZjvmtZKDMlBmwlWZ5omqf3VyBPr5IP7LzX9yZLW181Xc98Y/mSLEd+KWhxmbCLVn43TwTKcjUi4us/Z9aou6CF400vuu1xnh0Whvw7nM7T9kqUaY7VCl8RLsQ3c2wRB5VwquGRRo4XTdJD823AWbjWgBTanktmOXyiPMlgppCJPMdekz9xcEuq8yDMoreqoCIkqv4csDuon3CixqbELpLptP6lgXx5EdBCCNNpep0KFKoChZIIIpK5TvmugOnftjPw9c"};
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
   // App state
   let state = null;
-  let sessionAuthorized = false; // cleared on reload
+  // Removed legacy per-browser code auth; we use signing only now
+  let signerKey = null; // CryptoKey private key cached for session
   let linkedFileHandle = null; // FileSystemFileHandle if JSON sync is linked
   let fileSyncTimer = null;
   let autoPullTimer = null;
@@ -188,7 +193,7 @@
   // --- Minimal Auth (client-side, encrypted verifier) ---
   const te = new TextEncoder();
   const td = new TextDecoder();
-  const MARKER = 'KABAN_AUTH_OK';
+  // Legacy marker removed (no per-browser code auth)
 
   function bufToB64(buf) {
     const bytes = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array(buf.buffer ?? buf);
@@ -214,47 +219,67 @@
     );
   }
 
-  async function createVerifier(pass) {
-    const salt = crypto.getRandomValues(new Uint8Array(16));
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const key = await deriveKey(pass, salt, AUTH_ITERATIONS);
-    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, te.encode(MARKER));
-    return { iter: AUTH_ITERATIONS, salt: bufToB64(salt), iv: bufToB64(iv), ct: bufToB64(ct) };
+  // Legacy per-browser code functions removed
+
+  // ----- Signing helpers (ECDSA P-256) -----
+  async function importPubKey() {
+    if (!SIGN_PUB_JWK) return null;
+    return crypto.subtle.importKey('jwk', SIGN_PUB_JWK, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']);
+  }
+  async function decryptPrivateKey(pass) {
+    if (!SIGN_PRIV_BLOB) return null;
+    const salt = b64ToBuf(SIGN_PRIV_BLOB.kdf?.salt || '');
+    const iv = b64ToBuf(SIGN_PRIV_BLOB.iv);
+    const base = await crypto.subtle.importKey('raw', te.encode(pass), 'PBKDF2', false, ['deriveKey']);
+    const aes = await crypto.subtle.deriveKey({ name:'PBKDF2', salt:new Uint8Array(salt), iterations: SIGN_PRIV_BLOB.kdf?.iter || AUTH_ITERATIONS, hash:'SHA-256' }, base, { name:'AES-GCM', length:256 }, false, ['decrypt']);
+    const pt = await crypto.subtle.decrypt({ name:'AES-GCM', iv:new Uint8Array(iv) }, aes, b64ToBuf(SIGN_PRIV_BLOB.ct));
+    const jwk = JSON.parse(td.decode(pt));
+    return crypto.subtle.importKey('jwk', jwk, { name:'ECDSA', namedCurve:'P-256' }, false, ['sign']);
+  }
+  async function signString(privKey, text) {
+    const sig = await crypto.subtle.sign({ name:'ECDSA', hash:'SHA-256' }, privKey, te.encode(text));
+    return bufToB64(sig);
+  }
+  async function verifyString(pubKey, text, sigB64) {
+    const ok = await crypto.subtle.verify({ name:'ECDSA', hash:'SHA-256' }, pubKey, b64ToBuf(sigB64), te.encode(text));
+    return ok;
+  }
+  function canonicalize(value) {
+    if (Array.isArray(value)) return '[' + value.map(canonicalize).join(',') + ']';
+    if (value && typeof value === 'object') {
+      const keys = Object.keys(value).sort();
+      return '{' + keys.map(k => JSON.stringify(k) + ':' + canonicalize(value[k])).join(',') + '}';
+    }
+    return JSON.stringify(value);
   }
 
-  async function verifyPass(pass, blob) {
-    try {
-      const salt = b64ToBuf(blob.salt);
-      const iv = b64ToBuf(blob.iv);
-      const key = await deriveKey(pass, new Uint8Array(salt), blob.iter || AUTH_ITERATIONS);
-      const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(iv) }, key, b64ToBuf(blob.ct));
-      return td.decode(pt) === MARKER;
-    } catch { return false; }
-  }
+  // Legacy ensureAuth removed; we use ensureSigner()
 
-  async function ensureAuth() {
-    if (sessionAuthorized) return true;
-    const raw = localStorage.getItem(AUTH_STORE_KEY);
-    if (!raw) {
-      const code = await openAuthModal({ mode: 'set' });
-      if (!code) return false;
-      const blob = await createVerifier(code);
-      localStorage.setItem(AUTH_STORE_KEY, JSON.stringify(blob));
-      sessionAuthorized = true;
-      toast('Security code set.');
-      return true;
-    } else {
-      const code = await openAuthModal({ mode: 'verify' });
-      if (!code) return false;
-      const blob = JSON.parse(raw);
-      const ok = await verifyPass(code, blob);
-      if (!ok) { toast('Incorrect code'); return false; }
-      sessionAuthorized = true;
-      return true;
+  async function ensureSigner() {
+    const secure = !!(window.isSecureContext && crypto?.subtle);
+    if (!secure) { toast('Signing requires https or localhost.'); return false; }
+    if (!SIGN_PUB_JWK || !SIGN_PRIV_BLOB) { toast('Owner signing keys not configured.'); return false; }
+    if (signerKey) return true;
+    // Retry until correct or cancelled
+    while (true) {
+      const pass = await openAuthModal({ mode: 'verify', errorText: '' });
+      if (!pass) return false;
+      try {
+        signerKey = await decryptPrivateKey(pass);
+        if (signerKey) return true;
+      } catch {}
+      // Wrong passphrase; show inline error and try again
+      const maybe = await openAuthModal({ mode: 'verify', errorText: 'Incorrect passphrase. Try again.' });
+      if (!maybe) return false;
+      try {
+        signerKey = await decryptPrivateKey(maybe);
+        if (signerKey) return true;
+      } catch {}
+      // Loop continues
     }
   }
 
-  function openAuthModal({ mode }) {
+  function openAuthModal({ mode, errorText = '' }) {
     return new Promise((resolve) => {
       const dlg = document.getElementById('authModal');
       const title = document.getElementById('authTitle');
@@ -267,18 +292,18 @@
       const cancel = document.getElementById('cancelAuthBtn');
       const closeBtn = document.getElementById('closeAuthBtn');
 
-      err.classList.add('hidden');
-      err.textContent = '';
+      if (errorText) { err.textContent = errorText; err.classList.remove('hidden'); }
+      else { err.classList.add('hidden'); err.textContent = ''; }
       code.value = '';
       code2.value = '';
 
       if (mode === 'set') {
-        title.textContent = 'Set Security Code';
-        hint.textContent = 'This code will be required for delete, reset, import, and export.';
+        title.textContent = 'Set Passphrase';
+        hint.textContent = 'This passphrase unlocks protected actions (signing).';
         confWrap.classList.remove('hidden');
       } else {
-        title.textContent = 'Enter Security Code';
-        hint.textContent = 'Enter your code to continue.';
+        title.textContent = 'Enter Passphrase';
+        hint.textContent = 'Enter your passphrase to continue.';
         confWrap.classList.add('hidden');
       }
 
@@ -296,7 +321,7 @@
         e.preventDefault();
         const a = code.value.trim();
         if (!a || a.length < 6) {
-          err.textContent = 'Code must be at least 6 characters.';
+          err.textContent = 'Passphrase must be at least 6 characters.';
           err.classList.remove('hidden');
           code.focus();
           return;
@@ -304,7 +329,7 @@
         if (mode === 'set') {
           const b = code2.value.trim();
           if (a !== b) {
-            err.textContent = 'Codes do not match.';
+            err.textContent = 'Passphrases do not match.';
             err.classList.remove('hidden');
             code2.focus();
             return;
@@ -407,18 +432,21 @@
       const text = await file.text();
       const parsed = JSON.parse(text);
       const data = parsed?.data || parsed;
-      if (data && data.cards && data.columns) {
-        state = data;
-        saveState();
-        render();
-        toast('Pulled state from JSON');
-        // Update mtime + status
-        lastFileMtimeMs = file.lastModified || Date.parse(file.lastModifiedDate || '') || Date.now();
-        lastSyncAtMs = Date.now();
-        updateLinkedStatus();
-      } else {
-        toast('Linked file does not contain a valid board');
+      if (SIGN_PUB_JWK) {
+        const pub = await importPubKey();
+        const payload = { meta: parsed.meta || {}, data };
+        const canon = canonicalize(payload);
+        const ok = parsed.sig && await verifyString(pub, canon, parsed.sig);
+        if (!ok) { toast('Signature invalid; refusing to load'); return; }
       }
+      if (!data || !data.cards || !data.columns) { toast('Invalid board in file'); return; }
+      state = data;
+      saveState();
+      render();
+      toast('Pulled state from JSON');
+      lastFileMtimeMs = file.lastModified || Date.parse(file.lastModifiedDate || '') || Date.now();
+      lastSyncAtMs = Date.now();
+      updateLinkedStatus();
     } catch (e) {
       toast('Failed to read linked file');
     }
@@ -427,8 +455,12 @@
   async function writeToLinkedFile() {
     if (!linkedFileHandle) return;
     try {
+      if (!signerKey) { toast('Signer required to write JSON'); return; }
       const writable = await linkedFileHandle.createWritable();
-      const backup = { meta: { exportedAt: new Date().toISOString(), app: 'kaban-board', version: 1 }, data: state };
+      const payload = { meta: { exportedAt: new Date().toISOString(), app: 'kaban-board', version: 1 }, data: state };
+      const canon = canonicalize(payload);
+      const sig = await signString(signerKey, canon);
+      const backup = { ...payload, sig };
       await writable.write(JSON.stringify(backup, null, 2));
       await writable.close();
       // Refresh file metadata to capture new mtime
@@ -801,17 +833,22 @@
 
   // Export / Import
   function exportJson() {
-    const backup = {
-      meta: { exportedAt: new Date().toISOString(), app: 'kaban-board', version: 1 },
-      data: state,
-    };
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `kaban-board-backup-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const payload = { meta: { exportedAt: new Date().toISOString(), app: 'kaban-board', version: 1 }, data: state };
+    const canon = canonicalize(payload);
+    if (!signerKey) { toast('Signer unavailable'); return; }
+    // Sign and attach
+    const sigPromise = signString(signerKey, canon);
+    const out = { ...payload };
+    sigPromise.then(sig => {
+      out.sig = sig;
+      const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `kaban-board-backup-${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
   }
 
   function importJson(file) {
@@ -819,7 +856,22 @@
     reader.onload = () => {
       try {
         const parsed = JSON.parse(reader.result);
-        const data = parsed?.data || parsed; // accept raw state or wrapper
+        const data = parsed?.data || parsed; // signed wrapper expected
+        // Verify signature if present and pubkey configured
+        if (SIGN_PUB_JWK) {
+          const pubVerify = importPubKey();
+          Promise.resolve(pubVerify).then(async (pub) => {
+            if (!pub) throw new Error('Verification key missing');
+            const payload = { meta: parsed.meta || {}, data };
+            const canon = canonicalize(payload);
+            const ok = parsed.sig && await verifyString(pub, canon, parsed.sig);
+            if (!ok) throw new Error('Signature verification failed');
+            state = data;
+            saveState();
+            render();
+          }).catch(err => { alert('Import failed: ' + err.message); });
+          return;
+        }
         if (!data || !data.cards || !data.columns) throw new Error('Invalid structure');
         // Basic shape checks
         for (const col of ['todo','inprogress','review','done']) {
@@ -869,24 +921,28 @@
 
   // Event wiring
   function wireUI() {
-    $('#exportBtn').addEventListener('click', async () => { if (await ensureAuth()) exportJson(); });
+    $('#exportBtn').addEventListener('click', async () => { if (await ensureSigner()) exportJson(); });
+    // Gate import before opening picker
+    const importBtn = document.getElementById('importBtn');
+    if (importBtn) importBtn.addEventListener('click', async (e) => { e.preventDefault(); if (await ensureSigner()) document.getElementById('importInput').click(); });
     $('#importInput').addEventListener('change', async (e) => {
       const file = e.target.files?.[0];
-      if (file && await ensureAuth()) importJson(file);
+      if (file && await ensureSigner()) importJson(file);
       e.target.value = '';
     });
-    $('#clearBoardBtn').addEventListener('click', async () => { if (await ensureAuth()) resetToSeed(); });
+    $('#clearBoardBtn').addEventListener('click', async () => { if (await ensureSigner()) resetToSeed(); });
     $('#themeToggle').addEventListener('click', cycleTheme);
     // JSON link/pull
     const linkBtn = $('#linkJsonBtn');
     const pullBtn = $('#pullJsonBtn');
     linkBtn.addEventListener('click', async () => {
       if (linkedFileHandle) {
-        if (!(await ensureAuth())) return;
+        if (!(await ensureSigner())) return;
         await unlinkJsonFile();
         clearInterval(autoPullTimer);
         lastFileMtimeMs = 0; lastSyncAtMs = 0; updateLinkedStatus();
       } else {
+        if (!(await ensureSigner())) return;
         await linkJsonFile();
         if (linkedFileHandle) { startAutoPull(); updateLinkedStatus(); }
       }
@@ -899,14 +955,50 @@
     if (search) search.addEventListener('input', (e) => setQuery(e.target.value));
 
     // Modal
+    // Adding/editing cards does not require signing; only destructive/global actions do
     $('#cardForm').addEventListener('submit', handleFormSubmit);
-    $('#deleteCardBtn').addEventListener('click', async () => { if (await ensureAuth()) handleDeleteCard(); });
+    $('#deleteCardBtn').addEventListener('click', async () => { if (await ensureSigner()) handleDeleteCard(); });
     $('#closeModalBtn').addEventListener('click', closeModal);
     $('#cancelBtn').addEventListener('click', closeModal);
+
+    // Mobile menu
+    const menuBtn = document.getElementById('mobileMenuBtn');
+    const menuDlg = document.getElementById('menuModal');
+    if (menuBtn && menuDlg) {
+      menuBtn.addEventListener('click', () => (typeof menuDlg.showModal === 'function' ? menuDlg.showModal() : menuDlg.setAttribute('open','open')));
+      menuDlg.addEventListener('click', async (e) => {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn) return;
+        const action = btn.getAttribute('data-action');
+        if (action === 'close') { if (menuDlg.open) menuDlg.close(); return; }
+        if (action === 'export') { if (await ensureSigner()) exportJson(); }
+        if (action === 'import') { if (await ensureSigner()) document.getElementById('importInputMobile').click(); }
+        if (action === 'reset') { if (await ensureSigner()) resetToSeed(); }
+        if (action === 'link') {
+          const linkBtn = document.getElementById('linkJsonBtn');
+          if (linkedFileHandle) { if (await ensureSigner()) { await unlinkJsonFile(); clearInterval(autoPullTimer); lastFileMtimeMs=0; lastSyncAtMs=0; updateLinkedStatus(); linkBtn.textContent='Link JSON'; } }
+          else { if (await ensureSigner()) { await linkJsonFile(); if (linkedFileHandle){ startAutoPull(); updateLinkedStatus(); linkBtn.textContent='Unlink JSON'; } } }
+        }
+        if (action === 'pull') { pullFromLinkedFile(); }
+        if (action === 'density') { cycleDensity(); }
+        if (action === 'theme') { cycleTheme(); }
+      });
+      const importMobile = document.getElementById('importInputMobile');
+      if (importMobile) importMobile.addEventListener('change', async (e) => { const file = e.target.files?.[0]; if (file && await ensureSigner()) importJson(file); e.target.value=''; });
+      const pullMobile = document.getElementById('pullMobile');
+      if (pullMobile) {
+        const sync = () => { pullMobile.disabled = !linkedFileHandle; };
+        const pullBtn = document.getElementById('pullJsonBtn');
+        if (pullBtn) new MutationObserver(sync).observe(pullBtn, { attributes:true, attributeFilter:['disabled'] });
+        sync();
+      }
+    }
   }
 
   // Boot
   window.addEventListener('DOMContentLoaded', () => {
+    // Ensure all dialogs start closed (avoid invisible overlays)
+    ['cardModal','authModal','confirmModal','menuModal'].forEach(id => { const d=document.getElementById(id); if (d && d.open) try{ d.close(); }catch{} });
     initTheme();
     initDensity();
     state = loadState() || seedData();
