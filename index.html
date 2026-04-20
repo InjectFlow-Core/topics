@@ -6,199 +6,122 @@
     <title>Kaban Board</title>
     <link href="tailwind.css" rel="stylesheet" />
     <style>
-      /* ── Base ── */
-      body {
-        background-image:
-          radial-gradient(ellipse 900px 600px at 5% -5%, rgba(111,130,255,.13), transparent 55%),
-          radial-gradient(ellipse 700px 500px at 105% 8%, rgba(80,220,170,.10), transparent 50%);
-        background-attachment: fixed;
-      }
-      .dark body {
-        background-image:
-          radial-gradient(ellipse 900px 600px at 5% -5%, rgba(99,102,241,.10), transparent 55%),
-          radial-gradient(ellipse 700px 500px at 105% 8%, rgba(52,211,153,.08), transparent 50%);
-      }
-
-      /* ── Drag states ── */
-      .is-over   { outline: 2px dashed rgba(99,102,241,.55) !important; outline-offset: -5px; background-color: rgba(99,102,241,.04) !important; }
-      .dragging  { opacity: .55; transform: scale(.97); }
-      .is-hidden { display: none !important; }
-      @keyframes shake {
-        10%,90%{ transform:translateX(-1px); }
-        20%,80%{ transform:translateX(2px); }
-        30%,50%,70%{ transform:translateX(-4px); }
-        40%,60%{ transform:translateX(4px); }
-      }
+      /* Drag & shake */
+      .is-over { outline: 2px dashed rgba(99,102,241,.6); outline-offset: -5px; background-color: rgba(99,102,241,.03) !important; }
+      .dragging { opacity: 0.55; transform: scale(0.97); }
+      @keyframes shake { 10%,90%{transform:translateX(-1px)} 20%,80%{transform:translateX(2px)} 30%,50%,70%{transform:translateX(-4px)} 40%,60%{transform:translateX(4px)} }
       .shake { animation: shake .4s ease; }
+      .is-hidden { display: none !important; }
 
-      /* ── Cards ── */
-      .card {
-        border-left-width: 3px;
-        transition: transform .14s ease, box-shadow .14s ease;
-      }
-      .card:not(.dragging):hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 22px rgba(0,0,0,.12);
-      }
-      .dark .card:not(.dragging):hover {
-        box-shadow: 0 8px 22px rgba(0,0,0,.40);
-      }
+      /* Modal backdrops */
+      dialog::backdrop { background: rgba(0,0,0,.5); backdrop-filter: blur(4px); }
 
-      /* Difficulty: left-border colour + subtle gradient wash */
-      .diff-beginner              { border-left-color:#22c55e; background-image:linear-gradient(to right,rgba(34,197, 94,.06),transparent 55%); }
+      /* Cards: hover lift + difficulty gradient wash */
+      .card { border-left-width: 3px; transition: transform .14s ease, box-shadow .14s ease; }
+      .card:not(.dragging):hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,.10); }
+      .dark .card:not(.dragging):hover { box-shadow: 0 6px 18px rgba(0,0,0,.38); }
+
+      .diff-beginner              { border-left-color:#22c55e; background-image:linear-gradient(to right,rgba(34,197,94,.06),transparent 55%); }
       .diff-beginner-intermediate { border-left-color:#86efac; background-image:linear-gradient(to right,rgba(134,239,172,.06),transparent 55%); }
-      .diff-intermediate          { border-left-color:#f59e0b; background-image:linear-gradient(to right,rgba(245,158, 11,.06),transparent 55%); }
-      .diff-intermediate-advanced { border-left-color:#f97316; background-image:linear-gradient(to right,rgba(249,115, 22,.07),transparent 55%); }
-      .diff-advanced              { border-left-color:#ef4444; background-image:linear-gradient(to right,rgba(239, 68, 68,.06),transparent 55%); }
-
-      .dark .diff-beginner              { background-image:linear-gradient(to right,rgba(34,197, 94,.10),transparent 55%); }
+      .diff-intermediate          { border-left-color:#f59e0b; background-image:linear-gradient(to right,rgba(245,158,11,.06),transparent 55%); }
+      .diff-intermediate-advanced { border-left-color:#f97316; background-image:linear-gradient(to right,rgba(249,115,22,.07),transparent 55%); }
+      .diff-advanced              { border-left-color:#ef4444; background-image:linear-gradient(to right,rgba(239,68,68,.06),transparent 55%); }
+      .dark .diff-beginner              { background-image:linear-gradient(to right,rgba(34,197,94,.10),transparent 55%); }
       .dark .diff-beginner-intermediate { background-image:linear-gradient(to right,rgba(134,239,172,.09),transparent 55%); }
-      .dark .diff-intermediate          { background-image:linear-gradient(to right,rgba(245,158, 11,.10),transparent 55%); }
-      .dark .diff-intermediate-advanced { background-image:linear-gradient(to right,rgba(249,115, 22,.11),transparent 55%); }
-      .dark .diff-advanced              { background-image:linear-gradient(to right,rgba(239, 68, 68,.10),transparent 55%); }
+      .dark .diff-intermediate          { background-image:linear-gradient(to right,rgba(245,158,11,.10),transparent 55%); }
+      .dark .diff-intermediate-advanced { background-image:linear-gradient(to right,rgba(249,115,22,.11),transparent 55%); }
+      .dark .diff-advanced              { background-image:linear-gradient(to right,rgba(239,68,68,.10),transparent 55%); }
 
-      /* ── Column header colour accents ── */
-      .column[data-column-id="todo"]       .column-header { background:linear-gradient(90deg,rgba(99,102,241,.07) 0%,transparent 68%); border-bottom-color:rgba(99,102,241,.2) !important; }
+      /* Column header colour accents */
+      .column[data-column-id="todo"]       .column-header { background:linear-gradient(90deg,rgba(99,102,241,.07),transparent 70%); border-bottom-color:rgba(99,102,241,.18)!important; }
       .column[data-column-id="todo"]       .column-title  { color:#6366f1; }
-      .column[data-column-id="inprogress"] .column-header { background:linear-gradient(90deg,rgba(245,158, 11,.08) 0%,transparent 68%); border-bottom-color:rgba(245,158,11,.25) !important; }
+      .column[data-column-id="inprogress"] .column-header { background:linear-gradient(90deg,rgba(245,158,11,.08),transparent 70%); border-bottom-color:rgba(245,158,11,.22)!important; }
       .column[data-column-id="inprogress"] .column-title  { color:#d97706; }
-      .column[data-column-id="review"]     .column-header { background:linear-gradient(90deg,rgba(168, 85,247,.07) 0%,transparent 68%); border-bottom-color:rgba(168,85,247,.2)  !important; }
+      .column[data-column-id="review"]     .column-header { background:linear-gradient(90deg,rgba(168,85,247,.07),transparent 70%); border-bottom-color:rgba(168,85,247,.18)!important; }
       .column[data-column-id="review"]     .column-title  { color:#9333ea; }
-      .column[data-column-id="done"]       .column-header { background:linear-gradient(90deg,rgba(34, 197, 94,.07) 0%,transparent 68%); border-bottom-color:rgba(34,197,94,.2)   !important; }
+      .column[data-column-id="done"]       .column-header { background:linear-gradient(90deg,rgba(34,197,94,.07),transparent 70%); border-bottom-color:rgba(34,197,94,.18)!important; }
       .column[data-column-id="done"]       .column-title  { color:#16a34a; }
-
       .dark .column[data-column-id="todo"]       .column-title { color:#818cf8; }
       .dark .column[data-column-id="inprogress"] .column-title { color:#fbbf24; }
       .dark .column[data-column-id="review"]     .column-title { color:#c084fc; }
       .dark .column[data-column-id="done"]       .column-title { color:#4ade80; }
 
-      /* ── WIP badge + add-card hover ── */
-      .wip-badge:hover, .add-card-btn:hover {
-        background: rgba(99,102,241,.1);
-        color: #6366f1;
-        border-color: rgba(99,102,241,.35);
-      }
-      .dark .wip-badge:hover, .dark .add-card-btn:hover {
-        background: rgba(129,140,248,.12);
-        color: #818cf8;
-        border-color: rgba(129,140,248,.35);
-      }
-
-      /* ── Modals ── */
-      dialog::backdrop { background:rgba(0,0,0,.5); backdrop-filter:blur(4px); }
-
-      /* ── Toast ── */
-      #toast { transition: opacity .2s ease, transform .2s ease; transform:translateX(-50%) translateY(6px); }
-      #toast.show { opacity:1 !important; transform:translateX(-50%) translateY(0); pointer-events:auto; }
-
-      /* ── Board scrollbar ── */
-      #board::-webkit-scrollbar { height:5px; }
-      #board::-webkit-scrollbar-track { background:transparent; }
-      #board::-webkit-scrollbar-thumb { background:rgba(148,163,184,.35); border-radius:3px; }
-      #board::-webkit-scrollbar-thumb:hover { background:rgba(148,163,184,.6); }
+      /* Toast slide-up */
+      #toast { transition: opacity .2s ease, transform .2s ease; transform: translateX(-50%) translateY(6px); }
+      #toast.show { opacity: 1 !important; transform: translateX(-50%) translateY(0); pointer-events: auto; }
     </style>
   </head>
-  <body class="bg-slate-50 dark:bg-slate-900 min-h-screen">
-
-    <header class="sticky top-0 z-10 flex items-center justify-between px-4 py-2.5 backdrop-blur-md bg-white/85 dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-700/60 shadow-sm">
-      <div class="flex items-center gap-2.5 text-slate-800 dark:text-slate-100">
-        <span class="text-xl leading-none">▦</span>
-        <h1 class="font-bold tracking-tight text-[15px]">Kaban Board</h1>
+  <body class="bg-slate-50 dark:bg-slate-900">
+    <header class="sticky top-0 z-10 flex items-center justify-between px-4 py-3 backdrop-blur bg-white/80 dark:bg-slate-900/70 border-b border-slate-200 dark:border-slate-700">
+      <div class="flex items-center gap-2 text-slate-800 dark:text-slate-100">
+        <span class="text-xl">▦</span>
+        <h1 class="font-semibold tracking-wide text-base">Kaban Board</h1>
       </div>
-
       <div class="flex items-center gap-2">
-        <!-- Search -->
-        <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus-within:ring-2 focus-within:ring-indigo-400/40 transition">
-          <span aria-hidden="true" class="text-slate-400 text-sm">🔍</span>
-          <input id="searchInput" class="bg-transparent outline-none text-sm text-slate-700 dark:text-slate-200 placeholder-slate-400 w-52" type="search" placeholder="Search…" aria-label="Search cards" />
+        <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+          <span aria-hidden="true">🔎</span>
+          <input id="searchInput" class="bg-transparent outline-none text-sm text-slate-700 dark:text-slate-200 placeholder-slate-400 w-56" type="search" placeholder="Search…" aria-label="Search cards" />
         </div>
-
-        <!-- Desktop actions -->
-        <div class="hidden md:flex items-center gap-1.5" id="headerActions">
-          <button type="button" id="exportBtn"
-            class="px-3 py-1.5 rounded-lg bg-gradient-to-b from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white text-sm font-medium shadow-sm transition"
-            title="Export board to JSON" aria-label="Export">Export</button>
-
-          <button type="button" id="importBtn"
-            class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-sm font-medium transition"
-            title="Import board from JSON" aria-label="Import">Import</button>
+        <div class="hidden md:flex items-center gap-2" id="headerActions">
+          <button type="button" id="exportBtn" class="px-3 py-1.5 rounded-md bg-primary text-white text-sm shadow-soft pointer-events-auto" title="Export board to JSON" aria-label="Export">Export</button>
+          <button type="button" id="importBtn" class="px-3 py-1.5 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-100 text-sm pointer-events-auto" title="Import board from JSON" aria-label="Import">Import</button>
           <input type="file" id="importInput" accept="application/json" hidden />
-
-          <button type="button" id="clearBoardBtn"
-            class="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm transition"
-            title="Reset to seed" aria-label="Reset">Reset</button>
-
-          <button type="button" id="remotePullBtn"
-            class="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm transition disabled:opacity-40"
-            title="Pull from remote" aria-label="Remote Pull" disabled>Pull</button>
-
-          <span id="linkedStatus" class="hidden sm:inline text-[11px] text-slate-400 dark:text-slate-500 ml-0.5 tabular-nums"></span>
-
-          <button type="button" id="densityToggle"
-            class="w-8 h-8 grid place-items-center rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition"
-            title="Toggle density" aria-label="Density">
+          <button type="button" id="clearBoardBtn" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 pointer-events-auto" title="Reset to Seed" aria-label="Reset">Reset</button>
+          <!-- Local file linking removed; server push is the source of truth. -->
+          <button type="button" id="remotePullBtn" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200" title="Pull from Remote URL" aria-label="Remote Pull" disabled>Remote Pull</button>
+          <span id="linkedStatus" class="hidden sm:inline text-xs text-slate-500 dark:text-slate-400 ml-1"></span>
+          <button type="button" id="densityToggle" class="w-9 h-9 grid place-items-center rounded-md border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 pointer-events-auto" title="Toggle density" aria-label="Density">
             <span id="densityIcon" aria-hidden="true">↕️</span>
           </button>
-
-          <button type="button" id="themeToggle"
-            class="w-8 h-8 grid place-items-center rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition"
-            title="Toggle theme" aria-label="Theme">
+          <button type="button" id="themeToggle" class="w-9 h-9 grid place-items-center rounded-md border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 pointer-events-auto" title="Toggle theme (Light/Dark/Auto)" aria-label="Theme">
             <span id="themeIcon" aria-hidden="true">🌤️</span>
           </button>
         </div>
-
-        <button type="button" id="mobileMenuBtn"
-          class="md:hidden w-9 h-9 grid place-items-center rounded-lg border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300"
-          aria-label="Menu">☰</button>
+        <button type="button" id="mobileMenuBtn" class="md:hidden w-10 h-10 grid place-items-center rounded-md border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300" aria-label="Menu">☰</button>
       </div>
     </header>
 
-    <main id="board" class="flex gap-3 p-3 overflow-x-auto items-start" aria-label="Kaban board"></main>
+    <main class="board flex gap-3 p-3 overflow-x-auto snap-x" id="board" aria-label="Kaban board">
+      <!-- Columns will be rendered here -->
+    </main>
 
     <!-- Card Modal -->
-    <dialog id="cardModal"
-      class="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 m-0 sm:w-[92vw] sm:max-w-3xl sm:h-auto sm:rounded-2xl sm:m-auto overflow-hidden">
-      <form method="dialog" id="cardForm" class="flex flex-col max-h-[92dvh]">
+    <dialog id="cardModal" class="modal bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 sm:w-[92vw] sm:max-w-4xl sm:h-auto sm:rounded-xl">
+      <form method="dialog" id="cardForm" class="modal-content flex flex-col">
         <!-- Accent bar -->
-        <div class="h-0.5 w-full" style="background:linear-gradient(to right,#6366f1,#a855f7);"></div>
-        <header class="flex items-center justify-between px-4 sm:px-5 py-3.5 border-b border-slate-200 dark:border-slate-700 shrink-0">
-          <div class="flex items-center gap-2.5">
-            <span aria-hidden="true" class="text-lg">🗂️</span>
-            <div>
-              <h2 id="modalTitle" class="font-bold text-[15px] leading-tight">Add Card</h2>
-              <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-px">Edit details and properties</p>
+        <div class="h-1 w-full bg-primary/80 rounded-t-xl"></div>
+        <header class="modal-header flex items-center justify-between px-3 sm:px-5 py-3 border-b border-slate-200 dark:border-slate-700">
+          <div class="flex items-center gap-2">
+            <span aria-hidden="true">🗂️</span>
+            <div class="leading-tight">
+              <h2 id="modalTitle" class="font-semibold text-base">Add Card</h2>
+              <p class="text-[11px] text-slate-500 dark:text-slate-400">Edit details and properties</p>
             </div>
           </div>
-          <button type="button" class="w-7 h-7 grid place-items-center rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition text-sm" id="closeModalBtn" aria-label="Close">✕</button>
+          <button type="button" class="icon-btn text-slate-500 hover:text-slate-700 dark:hover:text-slate-200" id="closeModalBtn" aria-label="Close">✕</button>
         </header>
-
-        <div class="p-4 sm:p-5 grid gap-4 sm:grid-cols-5 overflow-y-auto flex-1">
+        <div class="modal-body p-4 sm:p-5 grid gap-4 sm:grid-cols-5">
           <input type="hidden" id="cardId" />
           <input type="hidden" id="targetColumnId" />
-          <!-- Left -->
-          <section class="sm:col-span-3 grid gap-3.5">
-            <label class="grid gap-1">
-              <span class="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide flex items-center gap-1">📝 Title</span>
-              <input id="titleInput"
-                class="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400/50 focus:border-indigo-400 outline-none transition"
-                type="text" required placeholder="Summarize the task or topic" />
+          <!-- Left: main content -->
+          <section class="sm:col-span-3 grid gap-3">
+            <label class="field grid gap-1">
+              <span class="label text-xs text-slate-500 flex items-center gap-1"><span>📝</span> Title</span>
+              <input id="titleInput" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 outline-none" type="text" required placeholder="Summarize the task or topic" />
             </label>
-            <label class="grid gap-1">
-              <span class="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide flex items-center gap-1">🧾 Description</span>
-              <textarea id="descriptionInput"
-                class="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400/50 focus:border-indigo-400 outline-none transition min-h-[150px] resize-none"
-                rows="6" placeholder="Add context, acceptance criteria, links…"></textarea>
+            <label class="field grid gap-1">
+              <span class="label text-xs text-slate-500 flex items-center gap-1"><span>🧾</span> Description <span class="ml-1 text-[11px] text-slate-400">(plain text; keep it concise)</span></span>
+              <textarea id="descriptionInput" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 outline-none min-h-[140px]" rows="6" placeholder="Add context, acceptance criteria, links…"></textarea>
             </label>
           </section>
-          <!-- Right -->
-          <aside class="sm:col-span-2 grid gap-3 content-start">
-            <div class="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-3.5">
-              <h3 class="font-semibold text-[12px] uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-3 flex items-center gap-1.5">⚙️ Properties</h3>
+          <!-- Right: properties sidebar -->
+          <aside class="sm:col-span-2 grid gap-3">
+            <div class="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/40 p-3">
+              <h3 class="font-medium text-sm mb-2 flex items-center gap-2 text-slate-700 dark:text-slate-200"><span>⚙️</span> Properties</h3>
               <div class="grid gap-2.5">
                 <label class="grid gap-1">
-                  <span class="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">🎯 Difficulty</span>
-                  <select id="difficultyInput"
-                    class="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-400/50">
+                  <span class="label text-xs text-slate-500 flex items-center gap-1"><span>🎯</span> Difficulty</span>
+                  <select id="difficultyInput" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm">
                     <option>Beginner</option>
                     <option>Beginner-Intermediate</option>
                     <option>Intermediate</option>
@@ -207,154 +130,135 @@
                   </select>
                 </label>
                 <label class="grid gap-1">
-                  <span class="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">⏱️ Length</span>
-                  <input id="lengthInput"
-                    class="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-400/50"
-                    type="text" placeholder="e.g., 10-14 mins" />
+                  <span class="label text-xs text-slate-500 flex items-center gap-1"><span>⏱️</span> Length</span>
+                  <input id="lengthInput" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm" type="text" placeholder="e.g., 10-14 mins" />
                 </label>
               </div>
             </div>
-            <div class="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-3.5">
-              <h3 class="font-semibold text-[12px] uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">💡 Tips</h3>
-              <ul class="text-[12px] leading-relaxed text-slate-500 dark:text-slate-400 list-disc ml-4 space-y-0.5">
+            <div class="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/40 p-3">
+              <h3 class="font-medium text-sm mb-1 text-slate-700 dark:text-slate-200">Tips</h3>
+              <ul class="text-[12px] leading-relaxed text-slate-600 dark:text-slate-300 list-disc ml-4">
                 <li>Keep titles short and scannable.</li>
                 <li>Use description for context and links.</li>
-                <li>Set difficulty and length for planning.</li>
+                <li>Set difficulty and length for quick planning.</li>
               </ul>
             </div>
           </aside>
         </div>
-
-        <footer class="flex items-center gap-2 px-4 sm:px-5 py-3 border-t border-slate-200 dark:border-slate-700 shrink-0 bg-slate-50/80 dark:bg-slate-900/80">
-          <button type="button" id="deleteCardBtn" class="px-3 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-600 text-white text-sm font-medium transition" hidden>Delete</button>
+        <footer class="modal-footer flex items-center gap-2 px-4 sm:px-5 py-3 border-t border-slate-200 dark:border-slate-700">
+          <button type="button" id="deleteCardBtn" class="px-3 py-1.5 rounded-md bg-rose-500 text-white text-sm" hidden>Delete</button>
           <div class="flex-1"></div>
-          <span class="hidden sm:inline text-[11px] text-slate-400">Esc to close • ⌘/Ctrl+Enter to save</span>
-          <button type="button" class="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition" id="cancelBtn">Cancel</button>
-          <button type="submit"
-            class="px-4 py-1.5 rounded-lg bg-gradient-to-b from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white text-sm font-medium shadow-sm transition"
-            id="saveBtn">Save</button>
+          <span class="hidden sm:inline text-[11px] text-slate-400">Esc to close • ⌘/Ctrl + Enter to save</span>
+          <button type="button" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600" id="cancelBtn">Cancel</button>
+          <button type="submit" class="px-3 py-1.5 rounded-md bg-primary text-white text-sm shadow-soft" id="saveBtn">Save</button>
         </footer>
       </form>
     </dialog>
 
     <!-- Confirm Modal -->
-    <dialog id="confirmModal"
-      class="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 m-0 sm:w-[92vw] sm:max-w-sm sm:h-auto sm:rounded-2xl sm:m-auto">
+    <dialog id="confirmModal" class="modal bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 sm:w-[92vw] sm:max-w-sm sm:h-auto sm:rounded-xl">
       <form method="dialog" id="confirmForm" class="flex flex-col">
-        <header class="flex items-center justify-between px-4 py-3.5 border-b border-slate-200 dark:border-slate-700">
-          <h2 id="confirmTitle" class="font-bold text-[15px]">Confirm</h2>
-          <button type="button" class="w-7 h-7 grid place-items-center rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition text-sm" id="closeConfirmBtn" aria-label="Close">✕</button>
+        <header class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
+          <h2 id="confirmTitle" class="font-semibold">Confirm</h2>
+          <button type="button" class="text-slate-500" id="closeConfirmBtn" aria-label="Close">✕</button>
         </header>
-        <div class="p-4 sm:p-5">
-          <p id="confirmMessage" class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed"></p>
+        <div class="p-4">
+          <p id="confirmMessage" class="text-sm text-slate-600 dark:text-slate-300"></p>
         </div>
-        <footer class="flex items-center gap-2 px-4 py-3 border-t border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-900/80">
-          <button type="button" class="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition" id="cancelConfirmBtn">Cancel</button>
+        <footer class="flex items-center gap-2 px-4 py-3 border-t border-slate-200 dark:border-slate-700">
+          <button type="button" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600" id="cancelConfirmBtn">Cancel</button>
           <div class="flex-1"></div>
-          <button type="submit" class="px-3 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-600 text-white text-sm font-medium transition" id="confirmConfirmBtn">Confirm</button>
+          <button type="submit" class="px-3 py-1.5 rounded-md bg-rose-500 text-white text-sm" id="confirmConfirmBtn">Confirm</button>
         </footer>
       </form>
     </dialog>
 
     <!-- Auth Modal -->
-    <dialog id="authModal"
-      class="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 m-0 sm:w-[92vw] sm:max-w-sm sm:h-auto sm:rounded-2xl sm:m-auto">
+    <dialog id="authModal" class="modal bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 sm:w-[92vw] sm:max-w-sm sm:h-auto sm:rounded-xl">
       <form method="dialog" id="authForm" class="flex flex-col">
-        <header class="flex items-center justify-between px-4 py-3.5 border-b border-slate-200 dark:border-slate-700">
-          <h2 id="authTitle" class="font-bold text-[15px]">Passphrase</h2>
-          <button type="button" class="w-7 h-7 grid place-items-center rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition text-sm" id="closeAuthBtn" aria-label="Close">✕</button>
+        <header class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
+          <h2 id="authTitle" class="font-semibold">Passphrase</h2>
+          <button type="button" class="text-slate-500" id="closeAuthBtn" aria-label="Close">✕</button>
         </header>
-        <div class="p-4 sm:p-5 grid gap-3.5">
-          <p id="authHint" class="text-sm text-slate-500 dark:text-slate-400 leading-relaxed"></p>
+        <div class="p-4 grid gap-3">
+          <p id="authHint" class="text-sm text-slate-500"></p>
           <label class="grid gap-1">
-            <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Passphrase</span>
-            <input id="authCode"
-              class="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-400/50 transition"
-              type="password" autocomplete="current-password" />
+            <span class="text-xs text-slate-500">Passphrase</span>
+            <input id="authCode" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm" type="password" autocomplete="current-password" />
           </label>
           <label id="authConfirmWrap" class="grid gap-1 hidden">
-            <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Confirm Passphrase</span>
-            <input id="authCodeConfirm"
-              class="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-400/50 transition"
-              type="password" autocomplete="new-password" />
+            <span class="text-xs text-slate-500">Confirm Passphrase</span>
+            <input id="authCodeConfirm" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm" type="password" autocomplete="new-password" />
           </label>
-          <p id="authError" class="hidden text-xs text-rose-600 dark:text-rose-400"></p>
+          <p id="authError" class="hidden text-xs text-rose-600"></p>
         </div>
-        <footer class="flex items-center gap-2 px-4 py-3 border-t border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-900/80">
-          <button type="button" class="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition" id="cancelAuthBtn">Cancel</button>
+        <footer class="flex items-center gap-2 px-4 py-3 border-t border-slate-200 dark:border-slate-700">
+          <button type="button" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600" id="cancelAuthBtn">Cancel</button>
           <div class="flex-1"></div>
-          <button type="submit"
-            class="px-4 py-1.5 rounded-lg bg-gradient-to-b from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white text-sm font-medium shadow-sm transition"
-            id="authSubmitBtn">Continue</button>
+          <button type="submit" class="px-3 py-1.5 rounded-md bg-primary text-white text-sm" id="authSubmitBtn">Continue</button>
         </footer>
       </form>
     </dialog>
 
-    <!-- Column template -->
     <template id="columnTemplate">
-      <section class="column flex flex-col w-[248px] md:w-[276px] shrink-0 rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 shadow-sm overflow-hidden" data-column-id="">
-        <header class="column-header flex items-center justify-between px-3 py-2.5 border-b border-slate-100 dark:border-slate-800">
-          <h3 class="column-title m-0 text-[13px] font-bold tracking-tight"></h3>
-          <div class="column-tools inline-flex items-center gap-1.5">
-            <button class="wip-badge text-[11px] text-slate-500 dark:text-slate-400 px-2 py-0.5 rounded-full border border-slate-300/70 dark:border-slate-600/70 transition" title="Click to set WIP limit" aria-label="Set WIP limit">—</button>
-            <button class="add-card-btn text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-xl leading-none w-7 h-7 flex items-center justify-center rounded-md border border-transparent transition" title="Add card" aria-label="Add card">＋</button>
+      <section class="column flex flex-col w-[240px] md:w-[272px] shrink-0 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm" data-column-id="">
+        <header class="column-header flex items-center justify-between px-3 py-2 border-b border-slate-100 dark:border-slate-800">
+          <h3 class="column-title m-0 text-sm font-bold text-slate-800 dark:text-slate-100"></h3>
+          <div class="column-tools inline-flex items-center gap-2">
+            <button class="wip-badge text-xs text-slate-500 dark:text-slate-400 px-2 py-0.5 rounded-full border border-dashed border-slate-300 dark:border-slate-600" title="Click to set WIP limit" aria-label="Set WIP limit">—</button>
+            <button class="add-card-btn text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 text-lg leading-none" title="Add card" aria-label="Add">＋</button>
           </div>
         </header>
-        <div class="dropzone flex flex-col gap-2 p-2 min-h-[120px] flex-1 bg-slate-50/50 dark:bg-slate-800/25" aria-label="Dropzone" tabindex="0"></div>
+        <div class="dropzone flex flex-col gap-2 p-2 min-h-[120px] bg-slate-50/60 dark:bg-slate-800/40" aria-label="Dropzone" tabindex="0"></div>
       </section>
     </template>
 
-    <!-- Card template -->
     <template id="cardTemplate">
-      <article class="card cursor-pointer rounded-xl ring-1 ring-slate-200/80 dark:ring-slate-700/50 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm shadow-sm" draggable="true" tabindex="0">
-        <header class="card-header">
-          <h4 class="card-title m-0 text-[13px] font-semibold leading-snug text-slate-800 dark:text-slate-100 break-words"></h4>
+      <article class="card cursor-pointer rounded-md border-l-2 ring-1 ring-slate-200 dark:ring-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm shadow-sm hover:shadow transition" draggable="true">
+        <header class="card-header flex items-center">
+          <h4 class="card-title m-0 text-sm font-medium leading-snug text-slate-800 dark:text-slate-100 break-words"></h4>
         </header>
       </article>
     </template>
 
-    <div id="toast" class="toast fixed left-1/2 bottom-5 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 shadow-lg opacity-0 pointer-events-none text-sm font-medium" role="status" aria-live="polite"></div>
+    <div id="toast" class="toast fixed left-1/2 -translate-x-1/2 bottom-4 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 shadow-soft opacity-0 pointer-events-none transition" role="status" aria-live="polite"></div>
 
-    <!-- Mobile Menu -->
-    <dialog id="menuModal"
-      class="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 m-0 sm:max-w-xs sm:h-auto sm:rounded-2xl sm:m-auto">
+    <!-- Mobile Menu Modal -->
+    <dialog id="menuModal" class="modal bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 sm:max-w-sm sm:h-auto sm:rounded-xl">
       <div class="p-4 grid gap-2">
-        <button class="w-full px-3 py-2.5 rounded-xl bg-gradient-to-b from-indigo-500 to-indigo-600 text-white text-sm font-medium" data-action="export">Export</button>
-        <button class="w-full px-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-sm" data-action="import">Import</button>
+        <button class="px-3 py-2 rounded-md bg-primary text-white text-sm" data-action="export">Export</button>
+        <button class="px-3 py-2 rounded-md bg-slate-200 dark:bg-slate-700 text-sm" data-action="import">Import</button>
         <input type="file" id="importInputMobile" accept="application/json" hidden />
-        <button class="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-sm" data-action="reset">Reset</button>
-        <button class="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-sm disabled:opacity-40" data-action="remote-pull" id="remotePullMobile" disabled>Remote Pull</button>
-        <button class="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-sm" data-action="density">Toggle Density</button>
-        <button class="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-sm" data-action="theme">Toggle Theme</button>
-        <button class="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-sm" data-action="close">Close</button>
+        <button class="px-3 py-2 rounded-md border text-sm" data-action="reset">Reset</button>
+        <!-- Link/Unlink JSON removed; using server push -->
+        <!-- Pull and Remote URL actions removed; remote pulls happen automatically. -->
+        <button class="px-3 py-2 rounded-md border text-sm" data-action="remote-pull" id="remotePullMobile" disabled>Remote Pull</button>
+        <button class="px-3 py-2 rounded-md border text-sm" data-action="density">Toggle Density</button>
+        <button class="px-3 py-2 rounded-md border text-sm" data-action="theme">Toggle Theme</button>
+        <button class="px-3 py-2 rounded-md border text-sm" data-action="close">Close</button>
       </div>
     </dialog>
 
     <!-- Remote URL Modal -->
-    <dialog id="remoteModal"
-      class="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 m-0 sm:w-[92vw] sm:max-w-xl sm:h-auto sm:rounded-2xl sm:m-auto">
+    <dialog id="remoteModal" class="modal bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 sm:w-[92vw] sm:max-w-xl sm:h-auto sm:rounded-xl">
       <form method="dialog" id="remoteForm" class="flex flex-col">
-        <header class="flex items-center justify-between px-4 py-3.5 border-b border-slate-200 dark:border-slate-700">
-          <h2 class="font-bold text-[15px]">Remote URL</h2>
-          <button type="button" class="w-7 h-7 grid place-items-center rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition text-sm" id="closeRemoteBtn" aria-label="Close">✕</button>
+        <header class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
+          <h2 class="font-semibold">Remote URL</h2>
+          <button type="button" class="text-slate-500" id="closeRemoteBtn" aria-label="Close">✕</button>
         </header>
-        <div class="p-4 sm:p-5 grid gap-3">
-          <p class="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">Paste your remote JSON endpoint. The app will verify signatures on pull.</p>
-          <input id="remoteUrlInput"
-            class="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-400/50 transition"
-            type="url" placeholder="https://…" />
-          <p id="remoteErr" class="hidden text-xs text-rose-600 dark:text-rose-400"></p>
+        <div class="p-4 grid gap-2">
+          <p class="text-sm text-slate-500">Paste your remote JSON endpoint (e.g., your drive-to-json URL). The app will poll and verify signatures.</p>
+          <input id="remoteUrlInput" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm" type="url" placeholder="https://..." />
+          <p id="remoteErr" class="hidden text-xs text-rose-600"></p>
         </div>
-        <footer class="flex items-center gap-2 px-4 py-3 border-t border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-900/80">
-          <button type="button" class="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition" id="cancelRemoteBtn">Cancel</button>
+        <footer class="flex items-center gap-2 px-4 py-3 border-t border-slate-200 dark:border-slate-700">
+          <button type="button" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600" id="cancelRemoteBtn">Cancel</button>
           <div class="flex-1"></div>
-          <button type="submit"
-            class="px-4 py-1.5 rounded-lg bg-gradient-to-b from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white text-sm font-medium shadow-sm transition"
-            id="saveRemoteBtn">Save</button>
+          <button type="submit" class="px-3 py-1.5 rounded-md bg-primary text-white text-sm" id="saveRemoteBtn">Save</button>
         </footer>
       </form>
     </dialog>
 
     <script src="script.js"></script>
   </body>
-</html>
+  </html>
