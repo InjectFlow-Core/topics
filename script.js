@@ -45,6 +45,9 @@
   let lastWriteOkAtMs = 0;
   let lastWriteErr = '';
   let writeInFlight = false;
+  let linkedFileHandle = null;
+  let lastFileMtimeMs = 0;
+  let autoPullTimer = null;
 
   // Columns definition
   const columns = [
@@ -282,22 +285,15 @@
     if (!secure) { toast('Signing requires https or localhost.'); return false; }
     if (!SIGN_PUB_JWK || !SIGN_PRIV_BLOB) { toast('Owner signing keys not configured.'); return false; }
     if (signerKey) return true;
-    // Retry until correct or cancelled
+    let errorText = '';
     while (true) {
-      const pass = await openAuthModal({ mode: 'verify', errorText: '' });
+      const pass = await openAuthModal({ mode: 'verify', errorText });
       if (!pass) return false;
       try {
         signerKey = await decryptPrivateKey(pass);
         if (signerKey) return true;
       } catch {}
-      // Wrong passphrase; show inline error and try again
-      const maybe = await openAuthModal({ mode: 'verify', errorText: 'Incorrect passphrase. Try again.' });
-      if (!maybe) return false;
-      try {
-        signerKey = await decryptPrivateKey(maybe);
-        if (signerKey) return true;
-      } catch {}
-      // Loop continues
+      errorText = 'Incorrect passphrase. Try again.';
     }
   }
 
@@ -561,6 +557,9 @@
   }
 
   function scheduleFileSync() { /* no-op: local file sync removed */ }
+  async function idbSetHandle() {}
+  async function idbDeleteHandle() {}
+  function startAutoPull() {}
 
   // --- Server push (POST signed payload to server) ---
   let pushTimer = null;
@@ -577,9 +576,10 @@
       const sig = await signString(signerKey, canon);
       const body = JSON.stringify({ ...payload, sig });
       const res = await fetch(SERVER_PUSH_URL, { method:'POST', mode:'cors', headers:{ 'Content-Type':'application/json' }, body });
-      if (!res.ok) { console.warn('[kaban] pushRemote failed', res.status); return; }
+      if (!res.ok) { lastWriteErr = 'HTTP ' + res.status; updateLinkedStatus(); console.warn('[kaban] pushRemote failed', res.status); return; }
       const j = await res.json().catch(() => ({}));
       console.log('[kaban] pushRemote ok', j?.meta || {});
+      lastWriteErr = '';
       // Update local and remote status to reflect server acceptance
       const acceptedAt = j?.meta?.exportedAt || nowIso;
       const ms = Date.parse(acceptedAt) || Date.now();
@@ -590,7 +590,7 @@
       remoteRevSeen = acceptedRev;
       try { localStorage.setItem(LAST_LOCAL_EXPORT_MS_KEY, String(ms)); } catch {}
       updateLinkedStatus();
-    } catch (e) { console.warn('[kaban] pushRemote error', e); }
+    } catch (e) { lastWriteErr = e?.message || 'Network error'; updateLinkedStatus(); console.warn('[kaban] pushRemote error', e); }
   }
 
   function startAutoPullLocal(intervalMs = 15000) {
@@ -651,8 +651,14 @@
   function updateLinkedStatus() {
     const el = document.getElementById('linkedStatus');
     if (!el) return;
-    const lastR = remoteExportedAtMs ? new Date(remoteExportedAtMs).toLocaleTimeString() : '—';
-    el.textContent = `Server r${remoteRevSeen || 0} • ${lastR}`;
+    if (lastWriteErr) {
+      el.textContent = `⚠ Sync error`;
+      el.title = lastWriteErr;
+    } else {
+      const lastR = remoteExportedAtMs ? new Date(remoteExportedAtMs).toLocaleTimeString() : '—';
+      el.textContent = `r${remoteRevSeen || 0} • ${lastR}`;
+      el.title = '';
+    }
     el.classList.remove('hidden');
   }
 
@@ -689,11 +695,19 @@
       });
     }
 
+    let visibleCount = 0;
     for (const cardId of state.columns[col.id]) {
       const card = state.cards[cardId];
       const node = renderCard(card);
       if (!matchesFilter(card)) node.classList.add('is-hidden');
+      else visibleCount++;
       dropzone.appendChild(node);
+    }
+    if (currentQuery && visibleCount === 0 && state.columns[col.id].length > 0) {
+      const msg = document.createElement('p');
+      msg.className = 'text-xs text-center text-slate-400 dark:text-slate-500 py-3 select-none pointer-events-none';
+      msg.textContent = 'No results';
+      dropzone.appendChild(msg);
     }
 
     return section;
@@ -1146,6 +1160,20 @@
     if (dens) dens.addEventListener('click', cycleDensity);
     const search = document.getElementById('searchInput');
     if (search) search.addEventListener('input', (e) => setQuery(e.target.value));
+
+    // Keyboard: Ctrl/Cmd+K or / to focus search; Ctrl/Cmd+Enter to save card
+    document.addEventListener('keydown', (e) => {
+      const inField = e.target.matches('input,textarea,select,[contenteditable]');
+      if ((e.key === 'k' && (e.ctrlKey || e.metaKey)) || (e.key === '/' && !inField)) {
+        if (search) { e.preventDefault(); search.focus(); search.select(); }
+      }
+    });
+    $('#cardModal').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        $('#cardForm').requestSubmit();
+      }
+    });
 
     // Modal
     $('#cardForm').addEventListener('submit', handleFormSubmit);

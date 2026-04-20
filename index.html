@@ -5,110 +5,112 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Kaban Board</title>
     <link href="tailwind.css" rel="stylesheet" />
+    <link href="styles.css" rel="stylesheet" />
     <style>
-      /* Minimal custom states + dialog backdrop */
-      .is-over { outline: 2px dashed rgba(59,130,246,0.7); outline-offset: -6px; }
-      .dragging { opacity: 0.6; transform: scale(0.98); }
-      @keyframes shake { 10%, 90% { transform: translateX(-1px);} 20%,80%{transform:translateX(2px);} 30%,50%,70%{transform:translateX(-4px);} 40%,60%{transform:translateX(4px);} }
-      .shake { animation: shake 0.4s ease; }
-      .is-hidden { display: none !important; }
-      #cardModal::backdrop { background: rgba(0,0,0,.45); backdrop-filter: blur(2px); }
-      /* Difficulty accents for compact cards */
-      .card { border-left-width: 3px; }
-      .diff-beginner { border-left-color: #4cc38a; }
-      .diff-beginner-intermediate { border-left-color: #88d4a8; }
-      .diff-intermediate { border-left-color: #ffd166; }
-      .diff-intermediate-advanced { border-left-color: #f4a261; }
-      .diff-advanced { border-left-color: #ef476f; }
+      /* Card modal: two-column layout on wider screens */
+      @media (min-width: 560px) {
+        #cardModal .modal-body { grid-template-columns: 3fr 2fr; align-items: start; gap: 16px; }
+      }
+      /* Card modal height */
+      #cardModal { max-height: 92dvh; overflow: hidden; }
+      #cardForm  { max-height: 92dvh; overflow-y: auto; display: flex; flex-direction: column; }
     </style>
   </head>
-  <body class="bg-slate-50 dark:bg-slate-900">
-    <header class="sticky top-0 z-10 flex items-center justify-between px-4 py-3 backdrop-blur bg-white/80 dark:bg-slate-900/70 border-b border-slate-200 dark:border-slate-700">
-      <div class="flex items-center gap-2 text-slate-800 dark:text-slate-100">
-        <span class="text-xl">▦</span>
-        <h1 class="font-semibold tracking-wide text-base">Kaban Board</h1>
+  <body>
+    <header class="app-header">
+      <div class="app-title">
+        <span class="logo">▦</span>
+        <h1>Kaban Board</h1>
       </div>
-      <div class="flex items-center gap-2">
-        <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-          <span aria-hidden="true">🔎</span>
-          <input id="searchInput" class="bg-transparent outline-none text-sm text-slate-700 dark:text-slate-200 placeholder-slate-400 w-56" type="search" placeholder="Search…" aria-label="Search cards" />
+      <div class="header-actions">
+        <!-- Search -->
+        <div class="search-wrap hidden sm:flex">
+          <span class="search-icon" aria-hidden="true">🔍</span>
+          <input id="searchInput" class="search" type="search" placeholder="Search…" aria-label="Search cards" />
         </div>
+        <!-- Desktop actions -->
         <div class="hidden md:flex items-center gap-2" id="headerActions">
-          <button type="button" id="exportBtn" class="px-3 py-1.5 rounded-md bg-primary text-white text-sm shadow-soft pointer-events-auto" title="Export board to JSON" aria-label="Export">Export</button>
-          <button type="button" id="importBtn" class="px-3 py-1.5 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-100 text-sm pointer-events-auto" title="Import board from JSON" aria-label="Import">Import</button>
+          <button type="button" id="exportBtn" class="btn btn-primary" title="Export board to JSON" aria-label="Export">
+            <span class="btn-text">Export</span>
+          </button>
+          <button type="button" id="importBtn" class="btn" title="Import board from JSON" aria-label="Import">
+            <span class="btn-text">Import</span>
+          </button>
           <input type="file" id="importInput" accept="application/json" hidden />
-          <button type="button" id="clearBoardBtn" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 pointer-events-auto" title="Reset to Seed" aria-label="Reset">Reset</button>
-          <!-- Local file linking removed; server push is the source of truth. -->
-          <button type="button" id="remotePullBtn" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200" title="Pull from Remote URL" aria-label="Remote Pull" disabled>Remote Pull</button>
-          <span id="linkedStatus" class="hidden sm:inline text-xs text-slate-500 dark:text-slate-400 ml-1"></span>
-          <button type="button" id="densityToggle" class="w-9 h-9 grid place-items-center rounded-md border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 pointer-events-auto" title="Toggle density" aria-label="Density">
+          <button type="button" id="clearBoardBtn" class="btn btn-quiet" title="Reset to seed" aria-label="Reset">
+            <span class="btn-text">Reset</span>
+          </button>
+          <button type="button" id="remotePullBtn" class="btn btn-quiet" title="Pull from remote" aria-label="Remote Pull" disabled>
+            <span class="btn-text">Pull</span>
+          </button>
+          <span id="linkedStatus" class="hidden sm:inline" style="font-size:11px; color:var(--muted); white-space:nowrap;"></span>
+          <button type="button" id="densityToggle" class="btn-icon-only" title="Toggle density" aria-label="Density">
             <span id="densityIcon" aria-hidden="true">↕️</span>
           </button>
-          <button type="button" id="themeToggle" class="w-9 h-9 grid place-items-center rounded-md border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 pointer-events-auto" title="Toggle theme (Light/Dark/Auto)" aria-label="Theme">
+          <button type="button" id="themeToggle" class="btn-icon-only" title="Toggle theme" aria-label="Theme">
             <span id="themeIcon" aria-hidden="true">🌤️</span>
           </button>
         </div>
-        <button type="button" id="mobileMenuBtn" class="md:hidden w-10 h-10 grid place-items-center rounded-md border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300" aria-label="Menu">☰</button>
+        <button type="button" id="mobileMenuBtn" class="btn-icon-only md:hidden" aria-label="Menu">☰</button>
       </div>
     </header>
 
-    <main class="board flex gap-3 p-3 overflow-x-auto snap-x" id="board" aria-label="Kaban board">
-      <!-- Columns will be rendered here -->
-    </main>
+    <main class="board" id="board" aria-label="Kaban board"></main>
 
     <!-- Card Modal -->
-    <dialog id="cardModal" class="modal bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 sm:w-[92vw] sm:max-w-4xl sm:h-auto sm:rounded-xl">
-      <form method="dialog" id="cardForm" class="modal-content flex flex-col">
-        <!-- Accent bar -->
-        <div class="h-1 w-full bg-primary/80 rounded-t-xl"></div>
-        <header class="modal-header flex items-center justify-between px-3 sm:px-5 py-3 border-b border-slate-200 dark:border-slate-700">
-          <div class="flex items-center gap-2">
-            <span aria-hidden="true">🗂️</span>
-            <div class="leading-tight">
-              <h2 id="modalTitle" class="font-semibold text-base">Add Card</h2>
-              <p class="text-[11px] text-slate-500 dark:text-slate-400">Edit details and properties</p>
+    <dialog id="cardModal" class="modal" style="width:min(820px,96vw);">
+      <form method="dialog" id="cardForm">
+        <!-- Gradient accent bar -->
+        <div style="height:3px; background:linear-gradient(to right,var(--primary),color-mix(in oklab,var(--primary) 55%,#a855f7)); flex-shrink:0;"></div>
+        <header class="modal-header" style="flex-shrink:0;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span aria-hidden="true" style="font-size:18px;">🗂️</span>
+            <div>
+              <h2 id="modalTitle" style="margin:0;font-size:15px;font-weight:700;">Add Card</h2>
+              <p style="margin:0;font-size:11px;color:var(--muted);">Edit details and properties</p>
             </div>
           </div>
-          <button type="button" class="icon-btn text-slate-500 hover:text-slate-700 dark:hover:text-slate-200" id="closeModalBtn" aria-label="Close">✕</button>
+          <button type="button" class="icon-btn" id="closeModalBtn" aria-label="Close">✕</button>
         </header>
-        <div class="modal-body p-4 sm:p-5 grid gap-4 sm:grid-cols-5">
+
+        <div class="modal-body" style="overflow-y:auto;flex:1;">
           <input type="hidden" id="cardId" />
           <input type="hidden" id="targetColumnId" />
           <!-- Left: main content -->
-          <section class="sm:col-span-3 grid gap-3">
-            <label class="field grid gap-1">
-              <span class="label text-xs text-slate-500 flex items-center gap-1"><span>📝</span> Title</span>
-              <input id="titleInput" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 outline-none" type="text" required placeholder="Summarize the task or topic" />
-            </label>
-            <label class="field grid gap-1">
-              <span class="label text-xs text-slate-500 flex items-center gap-1"><span>🧾</span> Description <span class="ml-1 text-[11px] text-slate-400">(plain text; keep it concise)</span></span>
-              <textarea id="descriptionInput" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 outline-none min-h-[140px]" rows="6" placeholder="Add context, acceptance criteria, links…"></textarea>
-            </label>
+          <section style="display:grid;gap:12px;">
+            <div class="field">
+              <label class="label" for="titleInput">📝 Title</label>
+              <input id="titleInput" type="text" required placeholder="Summarize the task or topic" />
+            </div>
+            <div class="field">
+              <label class="label" for="descriptionInput">🧾 Description <span style="opacity:.55;">(plain text)</span></label>
+              <textarea id="descriptionInput" rows="7" placeholder="Add context, acceptance criteria, links…"></textarea>
+            </div>
           </section>
-          <!-- Right: properties sidebar -->
-          <aside class="sm:col-span-2 grid gap-3">
-            <div class="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/40 p-3">
-              <h3 class="font-medium text-sm mb-2 flex items-center gap-2 text-slate-700 dark:text-slate-200"><span>⚙️</span> Properties</h3>
-              <div class="grid gap-2.5">
-                <label class="grid gap-1">
-                  <span class="label text-xs text-slate-500 flex items-center gap-1"><span>🎯</span> Difficulty</span>
-                  <select id="difficultyInput" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm">
+          <!-- Right: properties -->
+          <aside style="display:grid;gap:12px;align-content:start;">
+            <div style="border-radius:10px;border:1px solid color-mix(in oklab,var(--text) 10%,transparent);background:color-mix(in oklab,var(--bg) 60%,var(--panel));padding:14px;">
+              <h3 style="margin:0 0 12px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;">⚙️ Properties</h3>
+              <div style="display:grid;gap:10px;">
+                <div class="field">
+                  <label class="label" for="difficultyInput">🎯 Difficulty</label>
+                  <select id="difficultyInput">
                     <option>Beginner</option>
                     <option>Beginner-Intermediate</option>
                     <option>Intermediate</option>
                     <option>Intermediate-Advanced</option>
                     <option>Advanced</option>
                   </select>
-                </label>
-                <label class="grid gap-1">
-                  <span class="label text-xs text-slate-500 flex items-center gap-1"><span>⏱️</span> Length</span>
-                  <input id="lengthInput" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm" type="text" placeholder="e.g., 10-14 mins" />
-                </label>
+                </div>
+                <div class="field">
+                  <label class="label" for="lengthInput">⏱️ Length</label>
+                  <input id="lengthInput" type="text" placeholder="e.g., 10-14 mins" />
+                </div>
               </div>
             </div>
-            <div class="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/40 p-3">
-              <h3 class="font-medium text-sm mb-1 text-slate-700 dark:text-slate-200">Tips</h3>
-              <ul class="text-[12px] leading-relaxed text-slate-600 dark:text-slate-300 list-disc ml-4">
+            <div style="border-radius:10px;border:1px solid color-mix(in oklab,var(--text) 10%,transparent);background:color-mix(in oklab,var(--bg) 60%,var(--panel));padding:14px;">
+              <h3 style="margin:0 0 8px;font-size:13px;font-weight:700;">💡 Tips</h3>
+              <ul style="margin:0;padding-left:16px;font-size:12px;line-height:1.65;color:var(--muted);">
                 <li>Keep titles short and scannable.</li>
                 <li>Use description for context and links.</li>
                 <li>Set difficulty and length for quick planning.</li>
@@ -116,120 +118,121 @@
             </div>
           </aside>
         </div>
-        <footer class="modal-footer flex items-center gap-2 px-4 sm:px-5 py-3 border-t border-slate-200 dark:border-slate-700">
-          <button type="button" id="deleteCardBtn" class="px-3 py-1.5 rounded-md bg-rose-500 text-white text-sm" hidden>Delete</button>
-          <div class="flex-1"></div>
-          <span class="hidden sm:inline text-[11px] text-slate-400">Esc to close • ⌘/Ctrl + Enter to save</span>
-          <button type="button" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600" id="cancelBtn">Cancel</button>
-          <button type="submit" class="px-3 py-1.5 rounded-md bg-primary text-white text-sm shadow-soft" id="saveBtn">Save</button>
+
+        <footer class="modal-footer" style="flex-shrink:0;">
+          <button type="button" id="deleteCardBtn" class="btn btn-danger" hidden>Delete</button>
+          <div style="flex:1;"></div>
+          <span class="hidden sm:inline" style="font-size:11px;color:var(--muted);">Esc to close • ⌘/Ctrl+Enter to save</span>
+          <button type="button" class="btn btn-quiet" id="cancelBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="saveBtn">Save</button>
         </footer>
       </form>
     </dialog>
 
     <!-- Confirm Modal -->
-    <dialog id="confirmModal" class="modal bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 sm:w-[92vw] sm:max-w-sm sm:h-auto sm:rounded-xl">
-      <form method="dialog" id="confirmForm" class="flex flex-col">
-        <header class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
-          <h2 id="confirmTitle" class="font-semibold">Confirm</h2>
-          <button type="button" class="text-slate-500" id="closeConfirmBtn" aria-label="Close">✕</button>
+    <dialog id="confirmModal" class="modal" style="width:min(400px,92vw);">
+      <form method="dialog" id="confirmForm" style="display:flex;flex-direction:column;">
+        <header class="modal-header">
+          <h2 id="confirmTitle" style="margin:0;font-size:15px;font-weight:700;">Confirm</h2>
+          <button type="button" class="icon-btn" id="closeConfirmBtn" aria-label="Close">✕</button>
         </header>
-        <div class="p-4">
-          <p id="confirmMessage" class="text-sm text-slate-600 dark:text-slate-300"></p>
+        <div style="padding:16px 18px;">
+          <p id="confirmMessage" style="margin:0;font-size:14px;color:var(--muted);line-height:1.55;"></p>
         </div>
-        <footer class="flex items-center gap-2 px-4 py-3 border-t border-slate-200 dark:border-slate-700">
-          <button type="button" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600" id="cancelConfirmBtn">Cancel</button>
-          <div class="flex-1"></div>
-          <button type="submit" class="px-3 py-1.5 rounded-md bg-rose-500 text-white text-sm" id="confirmConfirmBtn">Confirm</button>
+        <footer class="modal-footer">
+          <button type="button" class="btn btn-quiet" id="cancelConfirmBtn">Cancel</button>
+          <div style="flex:1;"></div>
+          <button type="submit" class="btn btn-danger" id="confirmConfirmBtn">Confirm</button>
         </footer>
       </form>
     </dialog>
 
     <!-- Auth Modal -->
-    <dialog id="authModal" class="modal bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 sm:w-[92vw] sm:max-w-sm sm:h-auto sm:rounded-xl">
-      <form method="dialog" id="authForm" class="flex flex-col">
-        <header class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
-          <h2 id="authTitle" class="font-semibold">Passphrase</h2>
-          <button type="button" class="text-slate-500" id="closeAuthBtn" aria-label="Close">✕</button>
+    <dialog id="authModal" class="modal" style="width:min(400px,92vw);">
+      <form method="dialog" id="authForm" style="display:flex;flex-direction:column;">
+        <header class="modal-header">
+          <h2 id="authTitle" style="margin:0;font-size:15px;font-weight:700;">Passphrase</h2>
+          <button type="button" class="icon-btn" id="closeAuthBtn" aria-label="Close">✕</button>
         </header>
-        <div class="p-4 grid gap-3">
-          <p id="authHint" class="text-sm text-slate-500"></p>
-          <label class="grid gap-1">
-            <span class="text-xs text-slate-500">Passphrase</span>
-            <input id="authCode" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm" type="password" autocomplete="current-password" />
-          </label>
-          <label id="authConfirmWrap" class="grid gap-1 hidden">
-            <span class="text-xs text-slate-500">Confirm Passphrase</span>
-            <input id="authCodeConfirm" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm" type="password" autocomplete="new-password" />
-          </label>
-          <p id="authError" class="hidden text-xs text-rose-600"></p>
+        <div style="padding:16px 18px;display:grid;gap:12px;">
+          <p id="authHint" style="margin:0;font-size:13px;color:var(--muted);"></p>
+          <div class="field">
+            <label class="label" for="authCode">Passphrase</label>
+            <input id="authCode" type="password" autocomplete="current-password" />
+          </div>
+          <div id="authConfirmWrap" class="field hidden">
+            <label class="label" for="authCodeConfirm">Confirm Passphrase</label>
+            <input id="authCodeConfirm" type="password" autocomplete="new-password" />
+          </div>
+          <p id="authError" class="hidden" style="margin:0;font-size:12px;color:var(--danger);"></p>
         </div>
-        <footer class="flex items-center gap-2 px-4 py-3 border-t border-slate-200 dark:border-slate-700">
-          <button type="button" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600" id="cancelAuthBtn">Cancel</button>
-          <div class="flex-1"></div>
-          <button type="submit" class="px-3 py-1.5 rounded-md bg-primary text-white text-sm" id="authSubmitBtn">Continue</button>
+        <footer class="modal-footer">
+          <button type="button" class="btn btn-quiet" id="cancelAuthBtn">Cancel</button>
+          <div style="flex:1;"></div>
+          <button type="submit" class="btn btn-primary" id="authSubmitBtn">Continue</button>
         </footer>
       </form>
     </dialog>
 
+    <!-- Column template -->
     <template id="columnTemplate">
-      <section class="column flex flex-col w-[240px] md:w-[272px] shrink-0 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm" data-column-id="">
-        <header class="column-header flex items-center justify-between px-3 py-2 border-b border-slate-100 dark:border-slate-800">
-          <h3 class="column-title m-0 text-sm font-bold text-slate-800 dark:text-slate-100"></h3>
-          <div class="column-tools inline-flex items-center gap-2">
-            <button class="wip-badge text-xs text-slate-500 dark:text-slate-400 px-2 py-0.5 rounded-full border border-dashed border-slate-300 dark:border-slate-600" title="Click to set WIP limit" aria-label="Set WIP limit">—</button>
-            <button class="add-card-btn text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 text-lg leading-none" title="Add card" aria-label="Add">＋</button>
+      <section class="column" data-column-id="">
+        <header class="column-header">
+          <h3 class="column-title"></h3>
+          <div class="column-tools">
+            <button class="wip-badge" title="Click to set WIP limit" aria-label="Set WIP limit">—</button>
+            <button class="add-card-btn btn" title="Add card" aria-label="Add card">＋</button>
           </div>
         </header>
-        <div class="dropzone flex flex-col gap-2 p-2 min-h-[120px] bg-slate-50/60 dark:bg-slate-800/40" aria-label="Dropzone" tabindex="0"></div>
+        <div class="dropzone" aria-label="Dropzone" tabindex="0"></div>
       </section>
     </template>
 
+    <!-- Card template -->
     <template id="cardTemplate">
-      <article class="card cursor-pointer rounded-md border-l-2 ring-1 ring-slate-200 dark:ring-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm shadow-sm hover:shadow transition" draggable="true">
-        <header class="card-header flex items-center">
-          <h4 class="card-title m-0 text-sm font-medium leading-snug text-slate-800 dark:text-slate-100 break-words"></h4>
+      <article class="card" draggable="true" tabindex="0">
+        <header class="card-header">
+          <h4 class="card-title"></h4>
         </header>
       </article>
     </template>
 
-    <div id="toast" class="toast fixed left-1/2 -translate-x-1/2 bottom-4 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 shadow-soft opacity-0 pointer-events-none transition" role="status" aria-live="polite"></div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <!-- Mobile Menu Modal -->
-    <dialog id="menuModal" class="modal bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 sm:max-w-sm sm:h-auto sm:rounded-xl">
-      <div class="p-4 grid gap-2">
-        <button class="px-3 py-2 rounded-md bg-primary text-white text-sm" data-action="export">Export</button>
-        <button class="px-3 py-2 rounded-md bg-slate-200 dark:bg-slate-700 text-sm" data-action="import">Import</button>
+    <!-- Mobile Menu -->
+    <dialog id="menuModal" class="modal" style="width:min(340px,92vw);">
+      <div style="padding:14px;display:grid;gap:8px;">
+        <button class="btn btn-primary" style="width:100%;justify-content:center;" data-action="export">Export</button>
+        <button class="btn" style="width:100%;justify-content:center;" data-action="import">Import</button>
         <input type="file" id="importInputMobile" accept="application/json" hidden />
-        <button class="px-3 py-2 rounded-md border text-sm" data-action="reset">Reset</button>
-        <!-- Link/Unlink JSON removed; using server push -->
-        <!-- Pull and Remote URL actions removed; remote pulls happen automatically. -->
-        <button class="px-3 py-2 rounded-md border text-sm" data-action="remote-pull" id="remotePullMobile" disabled>Remote Pull</button>
-        <button class="px-3 py-2 rounded-md border text-sm" data-action="density">Toggle Density</button>
-        <button class="px-3 py-2 rounded-md border text-sm" data-action="theme">Toggle Theme</button>
-        <button class="px-3 py-2 rounded-md border text-sm" data-action="close">Close</button>
+        <button class="btn btn-quiet" style="width:100%;justify-content:center;" data-action="reset">Reset</button>
+        <button class="btn btn-quiet" style="width:100%;justify-content:center;" data-action="remote-pull" id="remotePullMobile" disabled>Remote Pull</button>
+        <button class="btn btn-quiet" style="width:100%;justify-content:center;" data-action="density">Toggle Density</button>
+        <button class="btn btn-quiet" style="width:100%;justify-content:center;" data-action="theme">Toggle Theme</button>
+        <button class="btn btn-quiet" style="width:100%;justify-content:center;" data-action="close">Close</button>
       </div>
     </dialog>
 
     <!-- Remote URL Modal -->
-    <dialog id="remoteModal" class="modal bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 w-screen h-screen rounded-none p-0 sm:w-[92vw] sm:max-w-xl sm:h-auto sm:rounded-xl">
-      <form method="dialog" id="remoteForm" class="flex flex-col">
-        <header class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
-          <h2 class="font-semibold">Remote URL</h2>
-          <button type="button" class="text-slate-500" id="closeRemoteBtn" aria-label="Close">✕</button>
+    <dialog id="remoteModal" class="modal" style="width:min(520px,92vw);">
+      <form method="dialog" id="remoteForm" style="display:flex;flex-direction:column;">
+        <header class="modal-header">
+          <h2 style="margin:0;font-size:15px;font-weight:700;">Remote URL</h2>
+          <button type="button" class="icon-btn" id="closeRemoteBtn" aria-label="Close">✕</button>
         </header>
-        <div class="p-4 grid gap-2">
-          <p class="text-sm text-slate-500">Paste your remote JSON endpoint (e.g., your drive-to-json URL). The app will poll and verify signatures.</p>
-          <input id="remoteUrlInput" class="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm" type="url" placeholder="https://..." />
-          <p id="remoteErr" class="hidden text-xs text-rose-600"></p>
+        <div style="padding:16px 18px;display:grid;gap:10px;">
+          <p style="margin:0;font-size:13px;color:var(--muted);">Paste your remote JSON endpoint. The app will verify signatures on pull.</p>
+          <input id="remoteUrlInput" type="url" placeholder="https://…" />
+          <p id="remoteErr" class="hidden" style="margin:0;font-size:12px;color:var(--danger);"></p>
         </div>
-        <footer class="flex items-center gap-2 px-4 py-3 border-t border-slate-200 dark:border-slate-700">
-          <button type="button" class="px-3 py-1.5 rounded-md border text-sm border-slate-300 dark:border-slate-600" id="cancelRemoteBtn">Cancel</button>
-          <div class="flex-1"></div>
-          <button type="submit" class="px-3 py-1.5 rounded-md bg-primary text-white text-sm" id="saveRemoteBtn">Save</button>
+        <footer class="modal-footer">
+          <button type="button" class="btn btn-quiet" id="cancelRemoteBtn">Cancel</button>
+          <div style="flex:1;"></div>
+          <button type="submit" class="btn btn-primary" id="saveRemoteBtn">Save</button>
         </footer>
       </form>
     </dialog>
 
     <script src="script.js"></script>
   </body>
-  </html>
+</html>
